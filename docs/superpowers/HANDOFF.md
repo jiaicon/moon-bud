@@ -89,6 +89,17 @@ dfb9ee4 feat(api): add member management with last-owner invariant
     Dockerfile 里没有已知错误，但 `docker compose up` 起后端**尚未验证**。
     后端目前只在宿主机验证过。
 
+## 留给 mobile 计划的未决问题（后端已做出选择，前端要跟着定）
+
+1. **`GET /api/families/:familyId/reminders?status=ACTIVE` 会包含已过期但未完成的提醒；
+   `?status=OVERDUE` 是更窄的筛（ACTIVE + 有过去的 PENDING 实例）。** 两者**不是**分区。
+   提醒页是"待办 / 已过期 / 已完成"三段式，若前端希望它们是互斥的，需要在 mobile 计划里
+   明确，并决定是改后端筛选还是前端自己过滤（这条是 api 计划 Task 9 留下的）。
+2. **`GET /api/families/:familyId/children/:childId/events/latest` 对归档孩子返回 400**，
+   而同一孩子的记录列表 `GET .../events?childId=` 返回 200（前者复用了创建路径的
+   `assertChildInFamily`，它连归档一起拒）。归档孩子在客户端不可见，所以影响很小，
+   但这是一个读接口的不一致，愿改就在 mobile 计划或一个小补丁里改。
+
 ## 环境状态
 
 - Docker Desktop 已启动，`moonbud-postgres` 容器在跑（healthy，宿主端口 5433）。

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { HealthModule } from './health/health.module'
+import { PrismaModule } from './prisma/prisma.module'
 
 @Module({
   imports: [
@@ -9,6 +10,7 @@ import { HealthModule } from './health/health.module'
       // 从仓库根读同一份 .env，容器内由 compose 的 environment 覆盖。
       envFilePath: ['../../.env', '.env'],
     }),
+    PrismaModule,
     HealthModule,
   ],
 })

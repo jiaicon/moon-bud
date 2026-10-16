@@ -23,7 +23,9 @@ services:
   # v1 的后端也容器化部署。DATABASE_URL 用服务名 postgres，而非 localhost。
   api:
     build:
-      context: ./apps/api
+      # 上下文是仓库根：apps/api 依赖 workspace 包 @moonbud/shared。
+      context: .
+      dockerfile: apps/api/Dockerfile
     container_name: moonbud-api
     restart: unless-stopped
     depends_on:

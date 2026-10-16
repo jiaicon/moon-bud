@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  // 构建时排除 test。把 test 纳入同一编译会抬高 tsc 推断出的公共根目录，
+  // 产物会落到 dist/src/main.js 而不是 dist/main.js——Dockerfile 与
+  // package.json 的 start:prod 都指向 dist/main.js。
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "test", "**/*.e2e-spec.ts"]
+}

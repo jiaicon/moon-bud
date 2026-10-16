@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+dist
+**/dist
+unpackage
+**/unpackage
+coverage
+**/coverage
+.git
+.superpowers
+docs
+*.log
+.env
+.env.*
+!.env.example

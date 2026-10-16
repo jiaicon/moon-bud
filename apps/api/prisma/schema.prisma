@@ -7,4 +7,289 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// 模型在 Task 2 定义。
+// ─────────────────────────────────────────────────────────────
+// 表名一律 snake_case（用 @@map 指定），与设计文档第 4 节一致。
+// 所有时间列统一 timestamptz：时间在 JSON 里是 ISO 8601 字符串，
+// 在库里是带时区的时刻——"提醒每天早 8 点"必须能落到某个具体 UTC 瞬间。
+// ─────────────────────────────────────────────────────────────
+
+enum FamilyRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  UNKNOWN
+}
+
+enum ReminderType {
+  ONE_TIME
+  RECURRING
+}
+
+enum ReminderStatus {
+  ACTIVE
+  DONE
+  CANCELLED
+}
+
+enum OccurrenceStatus {
+  PENDING
+  DONE
+  SKIPPED
+}
+
+model User {
+  id                 String    @id @default(uuid()) @db.Uuid
+  /// 登录标识。一律小写存储，因此"大小写不敏感"是天然行为而非额外逻辑。
+  username           String    @unique
+  passwordHash       String
+  nickname           String
+  /// 仅作联系方式，不参与鉴权、不发验证。
+  email              String?   @unique
+  phone              String?   @unique
+  avatarUrl          String?
+  /// IANA 时区，注册时取设备值。提醒默认用创建者时区。
+  timezone           String
+  /// 用临时密码登录后为 true，客户端强制跳转修改密码。
+  mustChangePassword Boolean   @default(false)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
+
+  refreshTokens        RefreshToken[]
+  passwordResets       PasswordResetToken[] @relation("PasswordResetTarget")
+  issuedResets         PasswordResetToken[] @relation("PasswordResetIssuer")
+  memberships          FamilyMember[]
+  ownedFamilies        Family[]             @relation("FamilyOwner")
+  createdInvites       FamilyInvite[]
+  createdEvents        Event[]              @relation("EventCreator")
+  updatedEvents        Event[]              @relation("EventUpdater")
+  createdReminders     Reminder[]           @relation("ReminderCreator")
+  assignedReminders    Reminder[]           @relation("ReminderAssignee")
+  completedOccurrences ReminderOccurrence[] @relation("OccurrenceCompleter")
+  notifications        Notification[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  /// 只存哈希：库泄露也拿不到可直接使用的 token。
+  tokenHash String    @unique
+  expiresAt DateTime  @db.Timestamptz(3)
+  revokedAt DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  /// 临时密码的哈希，不存明文。
+  tokenHash String
+  /// 由哪位 ADMIN/OWNER 发起。这是"家庭内部信任兜底"的审计线索。
+  issuedBy  String    @db.Uuid
+  expiresAt DateTime  @db.Timestamptz(3)
+  usedAt    DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+
+  user   User @relation("PasswordResetTarget", fields: [userId], references: [id], onDelete: Cascade)
+  issuer User @relation("PasswordResetIssuer", fields: [issuedBy], references: [id], onDelete: Restrict)
+
+  @@index([userId, usedAt])
+  @@map("password_reset_tokens")
+}
+
+model Family {
+  id         String    @id @default(uuid()) @db.Uuid
+  name       String
+  /// 冗余记录创建者，便于查询；真正的权限来源始终是 FamilyMember.role。
+  ownerId    String    @db.Uuid
+  /// 归档。家庭永不硬删除——一个家庭可能积累数年的记录。
+  archivedAt DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+
+  owner         User           @relation("FamilyOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  members       FamilyMember[]
+  children      Child[]
+  events        Event[]
+  reminders     Reminder[]
+  invites       FamilyInvite[]
+  notifications Notification[]
+
+  @@index([ownerId])
+  @@map("families")
+}
+
+model FamilyMember {
+  id          String     @id @default(uuid()) @db.Uuid
+  familyId    String     @db.Uuid
+  userId      String     @db.Uuid
+  role        FamilyRole
+  /// 在此家庭内的称呼，如"奶奶"。显示名可以与账号昵称不同。
+  displayName String?
+  joinedAt    DateTime   @default(now()) @db.Timestamptz(3)
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 防重复加入，也是"最后一名 OWNER"检查的查询依据。
+  @@unique([familyId, userId])
+  @@index([userId])
+  @@map("family_members")
+}
+
+model Child {
+  id         String    @id @default(uuid()) @db.Uuid
+  familyId   String    @db.Uuid
+  name       String
+  gender     Gender    @default(UNKNOWN)
+  birthday   DateTime  @db.Date
+  avatarUrl  String?
+  /// 软删除：保留历史记录的可解释性。
+  archivedAt DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+
+  family    Family     @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  events    Event[]
+  reminders Reminder[]
+
+  @@index([familyId, archivedAt])
+  @@map("children")
+}
+
+model Event {
+  id         String    @id @default(uuid()) @db.Uuid
+  childId    String    @db.Uuid
+  /// 冗余 familyId：按家庭查询与鉴权是最高频路径，避免每次 join children。
+  familyId   String    @db.Uuid
+  /// feeding / sleep / diaper / solid / medicine / temperature / growth / milestone
+  type       String
+  /// 事情发生的时间（非录入时间）。
+  occurredAt DateTime  @db.Timestamptz(3)
+  /// 睡眠等有区间的事件用。
+  endedAt    DateTime? @db.Timestamptz(3)
+  /// 类型专属字段。结构由 @moonbud/shared 的 zod schema 保证，数据库不校验。
+  payload    Json
+  note       String?
+  createdBy  String    @db.Uuid
+  updatedBy  String?   @db.Uuid
+  /// 一律软删除：硬删一条会让后续记录的连续性失去解释依据。
+  deletedAt  DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+
+  family  Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  child   Child  @relation(fields: [childId], references: [id], onDelete: Cascade)
+  creator User   @relation("EventCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  updater User?  @relation("EventUpdater", fields: [updatedBy], references: [id], onDelete: Restrict)
+
+  @@index([familyId, occurredAt(sort: Desc)])
+  @@index([childId, occurredAt(sort: Desc)])
+  /// 服务"最近一次喂奶"这类查询（防重复照护提示要用）。
+  @@index([childId, type, occurredAt(sort: Desc)])
+  @@map("events")
+}
+
+model Reminder {
+  id         String         @id @default(uuid()) @db.Uuid
+  familyId   String         @db.Uuid
+  /// 可为空：允许存在家庭级提醒（如"交疫苗本"）。
+  childId    String?        @db.Uuid
+  title      String
+  note       String?
+  type       ReminderType
+  /// ONE_TIME 用。
+  dueAt      DateTime?      @db.Timestamptz(3)
+  /// RECURRING 用，iCal RRULE 格式。
+  rrule      String?
+  /// 必须存：提醒"每天早 8 点"对一个驻外家人和在老家的奶奶不是同一时刻。
+  timezone   String
+  /// null 表示发给全家。
+  assigneeId String?        @db.Uuid
+  status     ReminderStatus @default(ACTIVE)
+  createdBy  String         @db.Uuid
+  createdAt  DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime       @updatedAt @db.Timestamptz(3)
+
+  family      Family               @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  child       Child?               @relation(fields: [childId], references: [id], onDelete: Cascade)
+  creator     User                 @relation("ReminderCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  assignee    User?                @relation("ReminderAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  occurrences ReminderOccurrence[]
+
+  @@index([familyId, status])
+  @@index([status, dueAt])
+  @@map("reminders")
+}
+
+model ReminderOccurrence {
+  id          String           @id @default(uuid()) @db.Uuid
+  reminderId  String           @db.Uuid
+  dueAt       DateTime         @db.Timestamptz(3)
+  /// 实际生成通知的时间。空表示还没通知过。
+  firedAt     DateTime?        @db.Timestamptz(3)
+  status      OccurrenceStatus @default(PENDING)
+  /// "疫苗这次是谁带去的"必须能回答——否则多个照护者会互相以为对方做了。
+  completedBy String?          @db.Uuid
+  completedAt DateTime?        @db.Timestamptz(3)
+  createdAt   DateTime         @default(now()) @db.Timestamptz(3)
+
+  reminder      Reminder       @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  completer     User?          @relation("OccurrenceCompleter", fields: [completedBy], references: [id], onDelete: SetNull)
+  notifications Notification[]
+
+  /// 幂等的基础：cron 重复跑不会生成重复实例，配合 skipDuplicates 即可。
+  @@unique([reminderId, dueAt])
+  @@index([status, dueAt])
+  @@map("reminder_occurrences")
+}
+
+model Notification {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  familyId     String    @db.Uuid
+  occurrenceId String?   @db.Uuid
+  title        String
+  body         String
+  readAt       DateTime? @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  family     Family              @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  occurrence ReminderOccurrence? @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+model FamilyInvite {
+  id        String     @id @default(uuid()) @db.Uuid
+  familyId  String     @db.Uuid
+  /// 8 位短码，排除易混字符 O/0/I/1/L。
+  code      String     @unique
+  /// 白名单只有 ADMIN/MEMBER：邀请永远不能产出 OWNER。
+  role      FamilyRole
+  createdBy String     @db.Uuid
+  expiresAt DateTime   @db.Timestamptz(3)
+  maxUses   Int        @default(1)
+  usedCount Int        @default(0)
+  revokedAt DateTime?  @db.Timestamptz(3)
+  createdAt DateTime   @default(now()) @db.Timestamptz(3)
+
+  family  Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  creator User   @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+
+  @@index([familyId, revokedAt])
+  @@map("family_invites")
+}

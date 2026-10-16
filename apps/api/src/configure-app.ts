@@ -16,7 +16,11 @@ export function configureApp(app: INestApplication): void {
       whitelist: true,
       forbidNonWhitelisted: false,
       transform: true,
-      transformOptions: { enableImplicitConversion: true },
+      // 刻意**不开** enableImplicitConversion：它按 TS 反射类型转换，
+      // 于是查询串里的 `?flag=false` 会走 Boolean('false') === true，
+      // 把"关"变成"开"，而且会盖掉 DTO 上显式的 @Transform。
+      // 数字/布尔一律用 @Type/@Transform 显式声明。
+      transformOptions: { enableImplicitConversion: false },
     }),
   )
 }

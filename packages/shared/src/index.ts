@@ -3,3 +3,4 @@
 // 先落在这个包里，否则两端会各自漂移。
 export * from './event-types'
 export * from './api-types'
+export * from './reminder-recurrence'

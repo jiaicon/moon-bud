@@ -1,6 +1,7 @@
 import type { INestApplication } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import { AppModule } from '../../src/app.module'
+import { configureApp } from '../../src/configure-app'
 
 /** 每个 e2e 文件各自起一个应用实例，走真实的 HTTP 管道与真实数据库。 */
 export async function createTestApp(): Promise<INestApplication> {
@@ -9,7 +10,8 @@ export async function createTestApp(): Promise<INestApplication> {
   }).compile()
 
   const app = moduleRef.createNestApplication()
-  app.setGlobalPrefix('api')
+  // 复用 main.ts 的装配，保证测试里的校验/前缀与线上完全一致。
+  configureApp(app)
   await app.init()
   return app
 }

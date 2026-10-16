@@ -1,5 +1,11 @@
-import { RRule } from 'rrule'
+import rrulePkg from 'rrule'
+import type { RRule as RRuleClass } from 'rrule'
 import type { ReminderType } from './api-types'
+
+// rrule 是纯 CommonJS 包，Node 的 ESM 加载器不为它合成具名导出，
+// 所以这里必须用默认导入再取属性。写成 `import { RRule }` 会让
+// ESM 产物（apps/mobile 消费的那份）在真实 Node 里加载失败。
+const { RRule } = rrulePkg
 
 /**
  * 时区处理的关键：RRULE 的 BYHOUR 指的是"墙上时间"（当地几点），
@@ -108,7 +114,7 @@ function wallToInstant(
   return candidate
 }
 
-function parseRule(rrule: string, dtstartWall: Date): RRule | null {
+function parseRule(rrule: string, dtstartWall: Date): RRuleClass | null {
   try {
     return RRule.fromString(
       rrule.includes('DTSTART') ? rrule : `DTSTART:${toIcsUtc(dtstartWall)}\nRRULE:${rrule}`,
@@ -198,13 +204,15 @@ export function expandDueDates(params: ExpandDueDatesParams): Date[] {
 
   let walls: Date[]
   try {
-    walls = rule.between(fromWall, toWall, true).filter((w) => w.getTime() < toWall.getTime())
+    walls = rule
+      .between(fromWall, toWall, true)
+      .filter((w: Date) => w.getTime() < toWall.getTime())
   } catch {
     return []
   }
 
   return walls
     .slice(0, limit)
-    .map((w) => wallToInstant(timezone, fmt, w))
-    .sort((a, b) => a.getTime() - b.getTime())
+    .map((w: Date) => wallToInstant(timezone, fmt, w))
+    .sort((a: Date, b: Date) => a.getTime() - b.getTime())
 }

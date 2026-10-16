@@ -173,6 +173,20 @@ export class EventsService {
   }
 
   /**
+   * 家庭作用域版的"最近一条"：先确认这个孩子属于这个家庭，再查。
+   * 控制器不自己拼这两步，免得哪天有人只写了后一半。
+   */
+  async findLatestInFamily(
+    familyId: string,
+    childId: string,
+    type: EventType,
+    until: Date,
+  ): Promise<EventDto | null> {
+    await this.assertChildInFamily(childId, familyId)
+    return this.findLatestByType(childId, type, until)
+  }
+
+  /**
    * 记录必须挂在**本家庭**的孩子上。少了这一步，任何成员都能把记录写进
    * 别家的孩子，而记录本身会带着本家庭的 familyId——数据从此自相矛盾。
    */

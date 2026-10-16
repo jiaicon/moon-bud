@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+unpackage/
+build/
+
+# env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# logs & coverage
+*.log
+npm-debug.log*
+coverage/
+.nyc_output/
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# SDD scratch workspace (per-plan ledgers, briefs, review packages)
+.superpowers/

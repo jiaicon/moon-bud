@@ -5,6 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
+import { isUUID } from 'class-validator'
 import type { FamilyMember, FamilyRole } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { FAMILY_ROLES_KEY } from './roles.decorator'
@@ -37,6 +38,12 @@ export class FamilyMemberGuard implements CanActivate {
 
     // 非家庭作用域的路由交给 JwtAuthGuard 负责。
     if (!familyId) return true
+
+    // 形状不对的 id 不可能是任何家庭，按"不存在"处理（403）。若直接拿去查库，
+    // uuid 列会抛 Prisma 错误，把一个非法输入变成 500——而 500 既不安全也不可读。
+    if (!isUUID(familyId)) {
+      throw new ForbiddenException('无权访问该家庭')
+    }
 
     const required =
       this.reflector.getAllAndOverride<FamilyRole[]>(FAMILY_ROLES_KEY, [

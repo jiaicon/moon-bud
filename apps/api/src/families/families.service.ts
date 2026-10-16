@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import type { FamilyRole } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
+import { assertFamilyHasOwner } from './members.service'
 
 @Injectable()
 export class FamiliesService {
@@ -84,15 +85,16 @@ export class FamiliesService {
     return { ok: true }
   }
 
-  async leave(familyId: string, userId: string) {
-    const remainingOwners = await this.prisma.familyMember.count({
-      where: { familyId, role: 'OWNER', userId: { not: userId } },
-    })
-    if (remainingOwners === 0) {
-      throw new BadRequestException('家庭必须至少保留一名所有者，请先转让所有权')
-    }
-    await this.prisma.familyMember.delete({
-      where: { familyId_userId: { familyId, userId } },
+  /**
+   * 退出家庭。最后一名 OWNER 禁止退出——家庭不能进入没人能管理的状态。
+   * 删除与检查必须在同一个事务里：先查后删会给并发退出留出让家庭无主的窗口。
+   */
+  async leave(familyId: string, userId: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.familyMember.delete({
+        where: { familyId_userId: { familyId, userId } },
+      })
+      await assertFamilyHasOwner(tx, familyId)
     })
   }
 

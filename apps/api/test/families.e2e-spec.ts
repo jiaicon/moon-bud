@@ -70,6 +70,13 @@ describe('家庭与权限', () => {
       .expect(403)
   })
 
+  it('形状非法的 familyId 也返回 403，而不是让 uuid 列的报错变成 500', async () => {
+    await request(app.getHttpServer())
+      .get('/api/families/not-a-uuid')
+      .set('Authorization', `Bearer ${b.token}`)
+      .expect(403)
+  })
+
   it('GET /api/families 只返回自己所属的家庭', async () => {
     const mine = await request(app.getHttpServer())
       .get('/api/families')

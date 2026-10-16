@@ -46,7 +46,14 @@
 		{
 			"path": "pages/event-list/index",
 			"style": {
-				"navigationBarTitleText": "记录"
+				"navigationBarTitleText": "记录",
+				"enablePullDownRefresh": true
+			}
+		},
+		{
+			"path": "pages/event-form/index",
+			"style": {
+				"navigationBarTitleText": "记一笔"
 			}
 		},
 		{

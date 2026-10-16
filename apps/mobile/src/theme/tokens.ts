@@ -4,6 +4,7 @@ export type ThemeTokens = {
   primary: string
   primaryLight: string
   onPrimary: string
+  info: string
   success: string
   warning: string
   error: string
@@ -29,6 +30,7 @@ export const lightTokens: ThemeTokens = {
   primary: '#000000',
   primaryLight: '#000000',
   onPrimary: '#000000',
+  info: '#000000',
   success: '#000000',
   warning: '#000000',
   error: '#000000',

@@ -3,21 +3,12 @@ import { computed } from 'vue'
 import PreviewFrame from '../../components/PreviewFrame.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import ThemeSwitcher from '../../components/ThemeSwitcher.vue'
+import { EVENT_TYPE_META } from '../../events/event-fields'
+import { formatEventLine } from '../../events/format-event'
 import { MOCK_CHILD, MOCK_EVENTS, MOCK_FAMILY, MOCK_REMINDERS, PREVIEW_SCREENS } from '../../preview/mock-data'
 
 const PREVIEW_VISITED_FLAG = 'previewVisited'
 uni.setStorageSync(PREVIEW_VISITED_FLAG, '1')
-
-const TYPE_LABELS: Record<string, string> = {
-  feeding: '喂奶',
-  sleep: '睡眠',
-  diaper: '尿布',
-  solid: '辅食',
-  medicine: '用药',
-  temperature: '体温',
-  growth: '生长',
-  milestone: '里程碑',
-}
 
 const clock = (iso: string): string => {
   const d = new Date(iso)
@@ -75,8 +66,8 @@ const go = (url: string) => uni.navigateTo({ url })
           <text class="card__value">{{ diaperToday }} 次</text>
         </view>
         <view class="chips">
-          <view v-for="(label, type) in TYPE_LABELS" :key="type" class="chip">
-            <text class="chip__label">{{ label }}</text>
+          <view v-for="(meta, type) in EVENT_TYPE_META" :key="type" class="chip">
+            <text class="chip__label">{{ meta.icon }} {{ meta.label }}</text>
           </view>
         </view>
       </preview-frame>
@@ -85,7 +76,7 @@ const go = (url: string) => uni.navigateTo({ url })
         <view v-for="event in MOCK_EVENTS.slice(0, 4)" :key="event.id" class="card card--row">
           <view class="card__dot" :style="{ backgroundColor: event.type === 'feeding' ? 'var(--mb-color-primary)' : 'var(--mb-color-surface-alt)' }" />
           <view class="card__main">
-            <text class="card__title">{{ TYPE_LABELS[event.type] }} · {{ clock(event.occurredAt) }}</text>
+            <text class="card__title">{{ formatEventLine(event) }}</text>
             <text class="card__meta">{{ event.createdByNickname }}{{ event.note ? ` · ${event.note}` : '' }}</text>
           </view>
         </view>

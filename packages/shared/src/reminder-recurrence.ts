@@ -1,11 +1,15 @@
-import rrulePkg from 'rrule'
+import * as rruleNs from 'rrule'
 import type { RRule as RRuleClass } from 'rrule'
 import type { ReminderType } from './api-types'
 
-// rrule 是纯 CommonJS 包，Node 的 ESM 加载器不为它合成具名导出，
-// 所以这里必须用默认导入再取属性。写成 `import { RRule }` 会让
-// ESM 产物（apps/mobile 消费的那份）在真实 Node 里加载失败。
-const { RRule } = rrulePkg
+// rrule 的三种解析路径各有缺口：CommonJS 入口只有 default，bundler 走的 ESM 入口
+// （package.json 的 module 字段）只有具名导出，而 Node 的 ESM 加载器面对这个 UMD 包
+// 又不保证合成具名导出。因此取 RRule 必须同时兼容"具名"和"default 上取属性"两种形态——
+// 只写其中一种，另一端就会在加载时报 "No matching export for import default"。
+type RRuleCtor = typeof import('rrule').RRule
+const RRule: RRuleCtor =
+  (rruleNs as { RRule?: RRuleCtor }).RRule ??
+  (rruleNs as { default?: { RRule: RRuleCtor } }).default!.RRule
 
 /**
  * 时区处理的关键：RRULE 的 BYHOUR 指的是"墙上时间"（当地几点），

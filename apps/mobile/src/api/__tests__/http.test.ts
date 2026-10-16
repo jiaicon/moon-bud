@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiRequestError, normalizeError } from '../errors'
 import { buildUrl, shouldRetryAfterRefresh } from '../http'
 
@@ -69,6 +69,50 @@ describe('access token', () => {
     setAccessToken(null)
     expect(getAccessToken()).toBeNull()
     expect(uni.getStorageSync('accessToken')).toBe('')
+  })
+})
+
+describe('apiRequest 的 401 续期', () => {
+  const uniAny = globalThis as unknown as { uni: Record<string, unknown> }
+  const originalRequest = uniAny.uni.request
+
+  const responds = (statusCode: number, data: unknown) =>
+    vi.fn((opts: { success: (res: { statusCode: number; data: unknown }) => void }) =>
+      opts.success({ statusCode, data }),
+    )
+
+  afterEach(() => {
+    uniAny.uni.request = originalRequest
+  })
+
+  it('公开端点的 401 不去续期：密码错误的文案不能被换成"本地没有登录凭证"', async () => {
+    const { apiRequest, setRefreshHandler } = await import('../http')
+    const refresh = vi.fn(async () => 'fresh')
+    setRefreshHandler(refresh)
+    uniAny.uni.request = responds(401, { statusCode: 401, message: '账号或密码不正确' })
+
+    await expect(apiRequest('/auth/login', { method: 'POST', auth: false })).rejects.toThrow(
+      '账号或密码不正确',
+    )
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('已鉴权请求的 401 先续期再重放一次', async () => {
+    const { apiRequest, setAccessToken, setRefreshHandler } = await import('../http')
+    setAccessToken('expired-at')
+    setRefreshHandler(async () => 'fresh-at')
+    let sent = 0
+    uniAny.uni.request = vi.fn(
+      (opts: { header: Record<string, string>; success: (res: { statusCode: number; data: unknown }) => void }) => {
+        sent += 1
+        const authed = opts.header.Authorization === 'Bearer fresh-at'
+        opts.success(authed ? { statusCode: 200, data: { ok: true } } : { statusCode: 401, data: {} })
+      },
+    )
+
+    await expect(apiRequest('/me')).resolves.toEqual({ ok: true })
+    expect(sent).toBe(2)
+    setAccessToken(null)
   })
 })
 

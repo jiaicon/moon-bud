@@ -11,6 +11,11 @@ import { ValidationPipe, type INestApplication } from '@nestjs/common'
 export function configureApp(app: INestApplication): void {
   app.setGlobalPrefix('api')
 
+  // 回显任意来源是安全的，因为凭据一律关闭：鉴权只走 Authorization 头，
+  // 浏览器不会自动带上任何东西（没有 cookie），跨源站点因此拿不到已登录会话。
+  // 关掉 CORS 的表现是前端只报"请求失败"、后端日志空白，所以必须有 e2e 钉住。
+  app.enableCors({ origin: true, methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'], credentials: false })
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

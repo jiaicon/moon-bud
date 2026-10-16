@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { onHide, onLaunch, onShow } from '@dcloudio/uni-app'
+import { useAuthStore } from './stores/auth'
 import { useThemeStore } from './stores/theme'
 
 onLaunch(() => {
   // 主题必须在第一帧之前落定，否则冷启动会闪一下默认色；纯本地读取，不发请求。
   useThemeStore().init()
+  // 冷启动静默登录：不这么做，刷新一次页面后本地只剩 refresh token，
+  // 每个请求都带着已过期的 access token 出门，用户看到的是莫名其妙的 401。
+  void useAuthStore().bootstrap()
 })
 onShow(() => {})
 onHide(() => {})

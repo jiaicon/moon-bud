@@ -75,7 +75,10 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
   if (res.statusCode >= 200 && res.statusCode < 300) return res.data as T
 
-  if (shouldRetryAfterRefresh(res.statusCode, false) && refreshHandler) {
+  // needsAuth 这一眼看着多余，实则关键：/auth/login 自己就返回 401，
+  // 若照样去续期，"账号或密码不正确"会被 refreshHandler 的失败文案顶掉，
+  // 用户看到的是"本地没有登录凭证"，完全无从下手。
+  if (needsAuth && shouldRetryAfterRefresh(res.statusCode, false) && refreshHandler) {
     try {
       const fresh = await refreshHandler()
       setAccessToken(fresh)

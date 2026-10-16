@@ -1,0 +1,134 @@
+import type {
+  AuthResponse,
+  ChildDto,
+  EventDto,
+  FamilyDto,
+  FamilyRole,
+  InviteDto,
+  InviteRole,
+  LatestEventResponse,
+  MeResponse,
+  MemberDto,
+  NotificationDto,
+  Paginated,
+  ReminderDto,
+  ReminderListFilter,
+  ReminderOccurrenceDto,
+  ThemePresetId,
+} from '@moonbud/shared'
+import { apiRequest, type Query } from './http'
+
+/** `GET /families/:familyId` 的返回：家庭 + 成员。shared 里没有这个组合类型，客户端在此声明。 */
+export type FamilyDetailDto = FamilyDto & { members: MemberDto[] }
+
+export interface RegisterInput {
+  username: string
+  password: string
+  nickname: string
+  timezone: string
+  email?: string
+  phone?: string
+}
+
+export interface EventCreateInput {
+  childId: string
+  type: EventDto['type']
+  occurredAt: string
+  endedAt?: string | null
+  payload: unknown
+  note?: string | null
+}
+
+export interface ReminderCreateInput {
+  title: string
+  type: ReminderDto['type']
+  childId?: string | null
+  note?: string | null
+  dueAt?: string | null
+  rrule?: string | null
+  timezone?: string
+  assigneeId?: string | null
+}
+
+export const authApi = {
+  register: (input: RegisterInput) => apiRequest<AuthResponse>('/auth/register', { method: 'POST', data: input, auth: false }),
+  login: (username: string, password: string) => apiRequest<AuthResponse>('/auth/login', { method: 'POST', data: { username, password }, auth: false }),
+  refresh: (refreshToken: string) => apiRequest<{ accessToken: string; refreshToken: string }>('/auth/refresh', { method: 'POST', data: { refreshToken }, auth: false }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    apiRequest<AuthResponse>('/auth/change-password', { method: 'POST', data: { oldPassword, newPassword } }),
+  resetRequest: (username: string) => apiRequest<{ message: string }>('/auth/reset-request', { method: 'POST', data: { username }, auth: false }),
+  logout: () => apiRequest<void>('/auth/logout', { method: 'POST' }),
+}
+
+export const meApi = {
+  get: () => apiRequest<MeResponse>('/me'),
+}
+
+export const familiesApi = {
+  // 家庭永不硬删除（spec 第 4 节）：这里只有 archive / leave / transfer，没有 remove。
+  list: () => apiRequest<FamilyDto[]>('/families'),
+  create: (name: string) => apiRequest<FamilyDto>('/families', { method: 'POST', data: { name } }),
+  get: (familyId: string) => apiRequest<FamilyDetailDto>(`/families/${familyId}`),
+  update: (familyId: string, name: string) => apiRequest<FamilyDto>(`/families/${familyId}`, { method: 'PATCH', data: { name } }),
+  archive: (familyId: string) => apiRequest<FamilyDto>(`/families/${familyId}/archive`, { method: 'POST' }),
+  transfer: (familyId: string, toUserId: string) => apiRequest<FamilyDto>(`/families/${familyId}/transfer`, { method: 'POST', data: { toUserId } }),
+  leave: (familyId: string) => apiRequest<void>(`/families/${familyId}/leave`, { method: 'POST' }),
+}
+
+export const membersApi = {
+  list: (familyId: string) => apiRequest<MemberDto[]>(`/families/${familyId}/members`),
+  updateRole: (familyId: string, memberId: string, role: Exclude<FamilyRole, 'OWNER'>, displayName?: string | null) =>
+    apiRequest<MemberDto>(`/families/${familyId}/members/${memberId}`, { method: 'PATCH', data: { role, displayName } }),
+  remove: (familyId: string, memberId: string) => apiRequest<void>(`/families/${familyId}/members/${memberId}`, { method: 'DELETE' }),
+  resetPassword: (familyId: string, memberId: string) =>
+    apiRequest<{ temporaryPassword: string }>(`/families/${familyId}/members/${memberId}/reset-password`, { method: 'POST' }),
+}
+
+export const invitesApi = {
+  create: (familyId: string, role: InviteRole, expiresInHours?: number, maxUses?: number) =>
+    apiRequest<InviteDto>(`/families/${familyId}/invites`, { method: 'POST', data: { role, expiresInHours, maxUses } }),
+  list: (familyId: string) => apiRequest<InviteDto[]>(`/families/${familyId}/invites`),
+  revoke: (familyId: string, inviteId: string) => apiRequest<void>(`/families/${familyId}/invites/${inviteId}`, { method: 'DELETE' }),
+  accept: (code: string) => apiRequest<FamilyDto>(`/invites/${code}/accept`, { method: 'POST' }),
+}
+
+export const childrenApi = {
+  list: (familyId: string) => apiRequest<ChildDto[]>(`/families/${familyId}/children`),
+  create: (familyId: string, input: { name: string; gender: ChildDto['gender']; birthday: string; avatarUrl?: string | null }) =>
+    apiRequest<ChildDto>(`/families/${familyId}/children`, { method: 'POST', data: input }),
+  update: (familyId: string, childId: string, input: Partial<{ name: string; gender: ChildDto['gender']; birthday: string; avatarUrl: string | null }>) =>
+    apiRequest<ChildDto>(`/families/${familyId}/children/${childId}`, { method: 'PATCH', data: input }),
+  remove: (familyId: string, childId: string) => apiRequest<void>(`/families/${familyId}/children/${childId}`, { method: 'DELETE' }),
+}
+
+export const eventsApi = {
+  list: (familyId: string, query?: Query) => apiRequest<Paginated<EventDto>>(`/families/${familyId}/events`, { query }),
+  create: (familyId: string, input: EventCreateInput) => apiRequest<EventDto>(`/families/${familyId}/events`, { method: 'POST', data: input }),
+  update: (familyId: string, eventId: string, input: Partial<EventCreateInput>) =>
+    apiRequest<EventDto>(`/families/${familyId}/events/${eventId}`, { method: 'PATCH', data: input }),
+  remove: (familyId: string, eventId: string) => apiRequest<void>(`/families/${familyId}/events/${eventId}`, { method: 'DELETE' }),
+  latest: (familyId: string, childId: string, type: EventDto['type']) =>
+    apiRequest<LatestEventResponse>(`/families/${familyId}/children/${childId}/events/latest`, { query: { type } }),
+}
+
+export const remindersApi = {
+  list: (familyId: string, status?: ReminderListFilter, query?: Query) =>
+    apiRequest<Paginated<ReminderDto>>(`/families/${familyId}/reminders`, { query: { status, ...query } }),
+  create: (familyId: string, input: ReminderCreateInput) => apiRequest<ReminderDto>(`/families/${familyId}/reminders`, { method: 'POST', data: input }),
+  get: (familyId: string, reminderId: string) => apiRequest<ReminderDto>(`/families/${familyId}/reminders/${reminderId}`),
+  update: (familyId: string, reminderId: string, input: Partial<ReminderCreateInput>) =>
+    apiRequest<ReminderDto>(`/families/${familyId}/reminders/${reminderId}`, { method: 'PATCH', data: input }),
+  complete: (familyId: string, reminderId: string, occurrenceId?: string | null) =>
+    apiRequest<ReminderDto>(`/families/${familyId}/reminders/${reminderId}/complete`, { method: 'POST', data: { occurrenceId } }),
+  cancel: (familyId: string, reminderId: string) => apiRequest<void>(`/families/${familyId}/reminders/${reminderId}`, { method: 'DELETE' }),
+  occurrences: (familyId: string, reminderId: string) =>
+    apiRequest<ReminderOccurrenceDto[]>(`/families/${familyId}/reminders/${reminderId}/occurrences`),
+}
+
+export const notificationsApi = {
+  list: (query?: Query) => apiRequest<Paginated<NotificationDto>>('/notifications', { query }),
+  markRead: (id: string) => apiRequest<NotificationDto>(`/notifications/${id}/read`, { method: 'POST' }),
+  readAll: () => apiRequest<{ updated: number }>('/notifications/read-all', { method: 'POST' }),
+}
+
+export type { ThemePresetId }

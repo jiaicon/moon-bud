@@ -5,6 +5,7 @@ const storage = new Map<string, unknown>()
   setStorageSync: (key: string, value: unknown) => void storage.set(key, value),
   getStorageSync: (key: string) => (storage.has(key) ? storage.get(key) : ''),
   removeStorageSync: (key: string) => void storage.delete(key),
+  getSystemInfoSync: () => ({ theme: 'light' }),
   request: () => {
     throw new Error('uni.request is not available in unit tests')
   },

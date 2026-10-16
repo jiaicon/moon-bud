@@ -5,6 +5,7 @@ import { AuthController } from './auth.controller'
 import { AuthService } from './auth.service'
 import { JwtStrategy } from './jwt.strategy'
 import { MeController } from './me.controller'
+import { ResetRequestService } from './reset-request.service'
 import { TokenService } from './token.service'
 
 @Module({
@@ -12,7 +13,7 @@ import { TokenService } from './token.service'
   // 避免同一个密钥被两种 token 共用。
   imports: [PassportModule, JwtModule.register({})],
   controllers: [AuthController, MeController],
-  providers: [AuthService, TokenService, JwtStrategy],
+  providers: [AuthService, TokenService, ResetRequestService, JwtStrategy],
   exports: [TokenService],
 })
 export class AuthModule {}

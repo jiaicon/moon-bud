@@ -5,6 +5,7 @@ import { AuthModule } from './auth/auth.module'
 import { JwtAuthGuard } from './auth/jwt-auth.guard'
 import { FamiliesModule } from './families/families.module'
 import { HealthModule } from './health/health.module'
+import { InvitesModule } from './invites/invites.module'
 import { PrismaModule } from './prisma/prisma.module'
 
 @Module({
@@ -18,6 +19,7 @@ import { PrismaModule } from './prisma/prisma.module'
     HealthModule,
     AuthModule,
     FamiliesModule,
+    InvitesModule,
   ],
   providers: [
     // 全局注册：新增路由默认受保护，忘记加守卫不会变成漏洞。

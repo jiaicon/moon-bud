@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
+import { APP_GUARD } from '@nestjs/core'
 import { AuthModule } from './auth/auth.module'
+import { JwtAuthGuard } from './auth/jwt-auth.guard'
 import { HealthModule } from './health/health.module'
 import { PrismaModule } from './prisma/prisma.module'
 
@@ -14,6 +16,10 @@ import { PrismaModule } from './prisma/prisma.module'
     PrismaModule,
     HealthModule,
     AuthModule,
+  ],
+  providers: [
+    // 全局注册：新增路由默认受保护，忘记加守卫不会变成漏洞。
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
 })
 export class AppModule {}

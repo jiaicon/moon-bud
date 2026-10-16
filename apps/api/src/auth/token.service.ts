@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common'
+import { Injectable, UnauthorizedException } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { ConfigService } from '@nestjs/config'
 import { randomUUID } from 'node:crypto'
@@ -75,7 +75,9 @@ export class TokenService {
         return this.issue(candidate.user.id, candidate.user.username)
       }
     }
-    throw new BadRequestException('登录状态已失效，请重新登录')
+    // 未匹配到任何有效 token：可能是已轮换（旧的立即作废）、已登出、已过期，
+    // 或纯属伪造。一律 401——这是认证失败，不是请求参数写错。
+    throw new UnauthorizedException('登录状态已失效，请重新登录')
   }
 
   async revokeAllForUser(userId: string): Promise<void> {

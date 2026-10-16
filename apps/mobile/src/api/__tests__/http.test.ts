@@ -1,0 +1,92 @@
+import { describe, expect, it, vi } from 'vitest'
+import { ApiRequestError, normalizeError } from '../errors'
+import { buildUrl, shouldRetryAfterRefresh } from '../http'
+
+describe('buildUrl', () => {
+  it('拼接 baseURL 与 path，且不产生双斜杠', () => {
+    expect(buildUrl('http://192.168.1.5:3000/api', '/families/1')).toBe('http://192.168.1.5:3000/api/families/1')
+    expect(buildUrl('http://192.168.1.5:3000/api/', '/families/1')).toBe('http://192.168.1.5:3000/api/families/1')
+  })
+
+  it('把 query 对象序列化，跳过 undefined 与 null', () => {
+    const url = buildUrl('http://h/api', '/events', { childId: 'c1', page: 1, type: undefined, from: null })
+    expect(url).toBe('http://h/api/events?childId=c1&page=1')
+  })
+
+  it('对值做 URL 编码（家庭名等可能含中文）', () => {
+    expect(buildUrl('http://h/api', '/x', { q: '宝宝 奶' })).toBe('http://h/api/x?q=%E5%AE%9D%E5%AE%9D%20%E5%A5%B6')
+  })
+})
+
+describe('shouldRetryAfterRefresh', () => {
+  it('401 且尚未重放过才刷新重试', () => {
+    expect(shouldRetryAfterRefresh(401, false)).toBe(true)
+    expect(shouldRetryAfterRefresh(401, true)).toBe(false)
+  })
+
+  it('403 不触发刷新（越权重试没有意义）', () => {
+    expect(shouldRetryAfterRefresh(403, false)).toBe(false)
+  })
+
+  it('5xx 与网络错误不触发刷新', () => {
+    expect(shouldRetryAfterRefresh(500, false)).toBe(false)
+    expect(shouldRetryAfterRefresh(0, false)).toBe(false)
+  })
+})
+
+describe('normalizeError', () => {
+  it('把 uni.request 的失败对象转成带网络标记的错误', () => {
+    const e = normalizeError({ errMsg: 'request:fail timeout' })
+    expect(e).toBeInstanceOf(ApiRequestError)
+    expect(e.isNetworkError).toBe(true)
+    expect(e.message).toMatch(/网络|连接/)
+  })
+
+  it('把后端 ApiError 转成用户可读文案', () => {
+    const e = normalizeError({ statusCode: 400, data: { statusCode: 400, message: ['账号需为 4–20 位字母、数字或下划线'], error: 'Bad Request' } })
+    expect(e.statusCode).toBe(400)
+    expect(e.message).toContain('4–20')
+    expect(e.isNetworkError).toBe(false)
+  })
+
+  it('message 为数组时全部拼接，不出现 [object Object]', () => {
+    const e = normalizeError({ statusCode: 400, data: { message: ['a', 'b'] } })
+    expect(e.message).toBe('a; b')
+  })
+
+  it('未知错误也有可读文案', () => {
+    expect(normalizeError(undefined).message).toBeTruthy()
+    expect(normalizeError({}).message).toBeTruthy()
+  })
+})
+
+describe('access token', () => {
+  it('setAccessToken 写入本地存储，null 清空', async () => {
+    const { getAccessToken, setAccessToken } = await import('../http')
+    setAccessToken('at-1')
+    expect(getAccessToken()).toBe('at-1')
+    expect(uni.getStorageSync('accessToken')).toBe('at-1')
+    setAccessToken(null)
+    expect(getAccessToken()).toBeNull()
+    expect(uni.getStorageSync('accessToken')).toBe('')
+  })
+})
+
+describe('baseURL 配置', () => {
+  it('缺少 VITE_API_BASE_URL 时抛错，而不是回退到 localhost', async () => {
+    vi.resetModules()
+    vi.stubEnv('VITE_API_BASE_URL', '')
+    await expect(import('../../config/env')).rejects.toThrow(/VITE_API_BASE_URL/)
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  it('配置了 baseURL 时去掉结尾斜杠', async () => {
+    vi.resetModules()
+    vi.stubEnv('VITE_API_BASE_URL', 'http://10.0.0.5:3000/api/')
+    const { API_BASE_URL } = await import('../../config/env')
+    expect(API_BASE_URL).toBe('http://10.0.0.5:3000/api')
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+})

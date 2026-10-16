@@ -1,0 +1,17 @@
+{
+  "name": "moonbud",
+  "private": true,
+  "packageManager": "pnpm@10.18.3",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "docker:up": "docker compose up -d postgres",
+    "docker:down": "docker compose down",
+    "dev:api": "pnpm --filter @moonbud/api start:dev",
+    "test:api": "pnpm --filter @moonbud/api test:e2e",
+    "dev:app": "pnpm --filter @moonbud/mobile dev:h5",
+    "test:shared": "pnpm --filter @moonbud/shared test",
+    "build:shared": "pnpm --filter @moonbud/shared build"
+  }
+}

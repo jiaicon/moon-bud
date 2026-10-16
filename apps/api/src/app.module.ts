@@ -9,6 +9,7 @@ import { FamiliesModule } from './families/families.module'
 import { HealthModule } from './health/health.module'
 import { InvitesModule } from './invites/invites.module'
 import { PrismaModule } from './prisma/prisma.module'
+import { RemindersModule } from './reminders/reminders.module'
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { PrismaModule } from './prisma/prisma.module'
     InvitesModule,
     ChildrenModule,
     EventsModule,
+    RemindersModule,
   ],
   providers: [
     // 全局注册：新增路由默认受保护，忘记加守卫不会变成漏洞。

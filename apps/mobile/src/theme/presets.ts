@@ -16,8 +16,9 @@ export const THEME_PRESETS: Record<ThemePresetId, ThemePreset> = {
     'mist-blue',
     '晨雾蓝',
     {
-      primary: '#4A7FB5',
+      primary: '#3F76B0',
       primaryLight: '#B7CEE6',
+      onPrimary: '#FFFFFF',
       success: '#4C9A6A',
       warning: '#D9A441',
       error: '#C25B57',
@@ -33,6 +34,7 @@ export const THEME_PRESETS: Record<ThemePresetId, ThemePreset> = {
     {
       primary: '#7FA8D9',
       primaryLight: '#3D5A7A',
+      onPrimary: '#12171C',
       success: '#6FB98A',
       warning: '#E5C078',
       error: '#E08A85',
@@ -52,6 +54,7 @@ export const THEME_PRESETS: Record<ThemePresetId, ThemePreset> = {
     {
       primary: '#D98E4A',
       primaryLight: '#F3D2AE',
+      onPrimary: '#3A2E22',
       success: '#5E9A5E',
       warning: '#D9A441',
       error: '#C25B57',
@@ -67,6 +70,7 @@ export const THEME_PRESETS: Record<ThemePresetId, ThemePreset> = {
     {
       primary: '#E8A768',
       primaryLight: '#6B4E2E',
+      onPrimary: '#191410',
       success: '#7CB87C',
       warning: '#E5C078',
       error: '#E08A85',
@@ -86,6 +90,7 @@ export const THEME_PRESETS: Record<ThemePresetId, ThemePreset> = {
     {
       primary: '#4CA87C',
       primaryLight: '#B6E2CD',
+      onPrimary: '#1C2E25',
       success: '#4C9A6A',
       warning: '#D9A441',
       error: '#C25B57',
@@ -101,6 +106,7 @@ export const THEME_PRESETS: Record<ThemePresetId, ThemePreset> = {
     {
       primary: '#6FC79C',
       primaryLight: '#2F5A46',
+      onPrimary: '#101713',
       success: '#6FB98A',
       warning: '#E5C078',
       error: '#E08A85',
@@ -120,6 +126,7 @@ export const THEME_PRESETS: Record<ThemePresetId, ThemePreset> = {
     {
       primary: '#7B5FA6',
       primaryLight: '#CDBDE6',
+      onPrimary: '#FFFFFF',
       success: '#4C9A6A',
       warning: '#D9A441',
       error: '#C25B57',
@@ -135,6 +142,7 @@ export const THEME_PRESETS: Record<ThemePresetId, ThemePreset> = {
     {
       primary: '#A98BD4',
       primaryLight: '#4A3C63',
+      onPrimary: '#151219',
       success: '#6FB98A',
       warning: '#E5C078',
       error: '#E08A85',

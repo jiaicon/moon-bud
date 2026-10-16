@@ -1,15 +1,80 @@
 {
-	"pages": [ //pages数组中第一项表示应用启动页，参考：https://uniapp.dcloud.io/collocation/pages
+	// pages数组中第一项表示应用启动页；游客态从这里进 welcome，而不是登录页。
+	"pages": [
 		{
-			"path": "pages/index/index",
+			"path": "pages/welcome/index",
 			"style": {
-				"navigationBarTitleText": "uni-app"
+				"navigationBarTitleText": "moonBud"
+			}
+		},
+		{
+			"path": "pages/preview/index",
+			"style": {
+				"navigationBarTitleText": "功能预览"
+			}
+		},
+		{
+			"path": "pages/home/index",
+			"style": {
+				"navigationBarTitleText": "首页"
+			}
+		},
+		{
+			"path": "pages/event-list/index",
+			"style": {
+				"navigationBarTitleText": "记录"
+			}
+		},
+		{
+			"path": "pages/reminder-list/index",
+			"style": {
+				"navigationBarTitleText": "提醒"
+			}
+		},
+		{
+			"path": "pages/profile/index",
+			"style": {
+				"navigationBarTitleText": "我的"
 			}
 		}
 	],
+	"easycom": {
+		"autoscan": true,
+		"custom": {
+			// uView Pro（npm 方式）组件自动引入；自研组件不走 easycom，页面里显式 import。
+			"^u-(.*)": "uview-pro/components/u-$1/u-$1.vue"
+		}
+	},
+	// 底部 Tab 固定 4 格（spec 第 9 节）。第 5 格「育儿知识」v1 不出现：
+	// 只在这里留注释与位置，不注册空页面——空页面比没有页面更容易让人以为坏了。
+	"tabBar": {
+		"color": "#5B6B7A",
+		"selectedColor": "#4A7FB5",
+		"backgroundColor": "#FFFFFF",
+		"borderStyle": "black",
+		"list": [
+			{
+				"pagePath": "pages/home/index",
+				"text": "首页"
+			},
+			{
+				"pagePath": "pages/event-list/index",
+				"text": "记录"
+			},
+			{
+				"pagePath": "pages/reminder-list/index",
+				"text": "提醒"
+			},
+			{
+				"pagePath": "pages/profile/index",
+				"text": "我的"
+			}
+			// 第 5 格预留：{ "pagePath": "pages/knowledge/index", "text": "育儿" }
+		]
+	},
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
-		"navigationBarTitleText": "uni-app",
+		"navigationBarTitleText": "moonBud",
 		"navigationBarBackgroundColor": "#F8F8F8",
 		"backgroundColor": "#F8F8F8"
 	}

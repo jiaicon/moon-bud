@@ -57,4 +57,30 @@ describe('主题预设', () => {
     expect(resolveDark('auto', true)).toBe(true)
     expect(resolveDark('auto', false)).toBe(false)
   })
+
+  it('主色按钮上的文字色达到 WCAG AA 对比，否则按钮文字看不见', () => {
+    const lum = (hex: string) => {
+      const channel = (i: number) => {
+        const s = parseInt(hex.slice(i, i + 2), 16) / 255
+        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+      }
+      return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
+    }
+    const ratio = (a: string, b: string) => {
+      const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x)
+      return (hi + 0.05) / (lo + 0.05)
+    }
+    for (const preset of Object.values(THEME_PRESETS)) {
+      for (const [mode, tokens] of [
+        ['light', preset.light],
+        ['dark', preset.dark],
+      ] as const) {
+        expect(tokens.onPrimary, `${preset.id}.${mode}.onPrimary 缺失`).toMatch(/^#[0-9A-Fa-f]{6}$/)
+        expect(
+          ratio(tokens.onPrimary, tokens.primary),
+          `${preset.id}.${mode} 的 onPrimary 压在 primary 上对比不足`,
+        ).toBeGreaterThanOrEqual(4.5)
+      }
+    }
+  })
 })

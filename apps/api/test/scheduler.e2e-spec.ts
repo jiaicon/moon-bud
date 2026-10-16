@@ -184,4 +184,18 @@ describe('提醒调度', () => {
     expect(await prisma.notification.count()).toBe(0)
     expect(await prisma.reminderOccurrence.count()).toBe(0)
   })
+
+  it('cron 在测试环境里不扫描（真实定时器会与 resetDatabase 抢同一批表）', async () => {
+    await createReminder({
+      title: '到期但不该被 cron 扫到',
+      type: 'ONE_TIME',
+      dueAt: new Date(Date.now() - 60_000).toISOString(),
+      timezone: 'Asia/Shanghai',
+    }).expect(201)
+
+    await scheduler.handleCron()
+
+    expect(await prisma.reminderOccurrence.count()).toBe(0)
+    expect(await prisma.notification.count()).toBe(0)
+  })
 })

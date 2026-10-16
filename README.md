@@ -51,6 +51,7 @@ cp .env.example .env
 | `DATABASE_URL` | **宿主进程**连库用。注意端口是 **5433**，见下方"已知环境差异" |
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | 双 token 签名密钥。**生产必须换成随机值**：`openssl rand -hex 32` |
 | `JWT_ACCESS_TTL` / `JWT_REFRESH_TTL` | access 2h、refresh 30d。access 只存在内存，refresh 存本地 |
+| `SCHEDULER_ENABLED` | 每分钟提醒扫描的开关。**生产必须为 `true`**，否则提醒不触发；e2e 里被 `test/setup-env.ts` 强制设为 `false` |
 
 ### 3. 装依赖
 

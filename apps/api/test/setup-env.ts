@@ -10,3 +10,7 @@ if (!process.env.JWT_ACCESS_SECRET) {
 if (!process.env.JWT_REFRESH_SECRET) {
   process.env.JWT_REFRESH_SECRET = 'test_refresh_secret'
 }
+
+// 关掉每分钟的真实 cron：它不受测试控制，会在别的 suite 清库清到一半时醒来，
+// 打出与真实缺陷无关的错误并污染计数。测试一律用 `scheduler.tick()` 显式驱动。
+process.env.SCHEDULER_ENABLED = 'false'

@@ -62,8 +62,21 @@ export class ReminderSchedulerService {
     return { created, notified }
   }
 
+  /**
+   * 真实定时器的唯一入口。`SCHEDULER_ENABLED=false` 时**不扫描**。
+   *
+   * 为什么需要这个开关：e2e 每个用例前都 `TRUNCATE` 一遍全库，而每分钟的
+   * 定时器不受测试控制——它会在别的 suite 跑到一半时醒来，读到的成员/实例
+   * 可能正好被下一次清库删掉，于是打出两条与真实缺陷无关的错误
+   * （通知外键失败、实例 update 找不到行），还会污染断言计数。
+   * 测试里改由 `tick()` 显式驱动，扫描逻辑本身仍被 8 条用例覆盖。
+   */
   @Cron(CronExpression.EVERY_MINUTE)
   async handleCron(): Promise<void> {
+    if (process.env.SCHEDULER_ENABLED === 'false') {
+      return
+    }
+
     try {
       const result = await this.tick()
       this.logger.log(`提醒扫描完成：新建实例 ${result.created} 条，发出通知 ${result.notified} 条`)

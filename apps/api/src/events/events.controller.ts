@@ -10,6 +10,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common'
+import { ApiTags } from '@nestjs/swagger'
 import type { FamilyMember } from '@prisma/client'
 import type { EventDto, Paginated } from '@moonbud/shared'
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator'
@@ -25,6 +26,7 @@ import { UpdateEventDto } from './dto/update-event.dto'
  * "仅创建者本人或 ADMIN/OWNER"，那一条**不能在守卫里表达**（它同时依赖
  * 角色和记录归属），所以由 service 判断，角色从请求上取，不重查一次库。
  */
+@ApiTags('记录')
 @Controller('families/:familyId/events')
 @UseGuards(FamilyMemberGuard)
 export class EventsController {

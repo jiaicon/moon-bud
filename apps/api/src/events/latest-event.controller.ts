@@ -1,4 +1,5 @@
 import { Controller, Get, Param, ParseUUIDPipe, Query, UseGuards } from '@nestjs/common'
+import { ApiTags } from '@nestjs/swagger'
 import type { EventType, LatestEventResponse } from '@moonbud/shared'
 import { FamilyMemberGuard } from '../families/family-member.guard'
 import { EventsService } from './events.service'
@@ -13,6 +14,7 @@ import { LatestEventQueryDto } from './dto/latest-event-query.dto'
  * 客户端只判空。路由是 `children/:childId/events/latest`，与
  * `events/:eventId` 段数不同，不存在谁吞掉谁的问题。
  */
+@ApiTags('记录')
 @Controller('families/:familyId/children/:childId/events')
 @UseGuards(FamilyMemberGuard)
 export class LatestEventController {

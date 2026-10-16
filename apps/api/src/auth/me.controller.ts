@@ -1,9 +1,11 @@
 import { Controller, Get } from '@nestjs/common'
+import { ApiTags } from '@nestjs/swagger'
 import type { MeResponse } from '@moonbud/shared'
 import { PrismaService } from '../prisma/prisma.service'
 import { toUserDto } from './auth.service'
 import { CurrentUser, type AuthUser } from './current-user.decorator'
 
+@ApiTags('我的')
 @Controller('me')
 export class MeController {
   constructor(private readonly prisma: PrismaService) {}

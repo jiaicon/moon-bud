@@ -10,6 +10,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common'
+import { ApiTags } from '@nestjs/swagger'
 import type { FamilyMember } from '@prisma/client'
 import type { MemberDto } from '@moonbud/shared'
 import { CurrentMember } from './current-member.decorator'
@@ -23,6 +24,7 @@ import { UpdateMemberDto } from './dto/update-member.dto'
  * 每个方法都要求 (familyId, 当前用户) 是一条真实的成员关系，
  * 读写权限再按 @RequireFamilyRole 细分。
  */
+@ApiTags('成员')
 @Controller('families/:familyId/members')
 @UseGuards(FamilyMemberGuard)
 export class MembersController {

@@ -10,6 +10,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common'
+import { ApiTags } from '@nestjs/swagger'
 import { IsOptional, IsUUID } from 'class-validator'
 import type { Paginated, ReminderDto, ReminderOccurrenceDto } from '@moonbud/shared'
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator'
@@ -26,6 +27,7 @@ class CompleteReminderDto {
   occurrenceId?: string
 }
 
+@ApiTags('提醒')
 @Controller('families/:familyId/reminders')
 @UseGuards(FamilyMemberGuard)
 export class RemindersController {

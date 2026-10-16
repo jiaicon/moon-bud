@@ -8,6 +8,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common'
+import { ApiTags } from '@nestjs/swagger'
 import { IsString, IsUUID, MaxLength, MinLength } from 'class-validator'
 import type { FamilyMember } from '@prisma/client'
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator'
@@ -35,6 +36,7 @@ class TransferDto {
   toUserId!: string
 }
 
+@ApiTags('家庭')
 @Controller('families')
 export class FamiliesController {
   constructor(private readonly families: FamiliesService) {}

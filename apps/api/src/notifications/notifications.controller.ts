@@ -1,4 +1,5 @@
 import { Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common'
+import { ApiTags } from '@nestjs/swagger'
 import type { NotificationDto, Paginated } from '@moonbud/shared'
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator'
 import { NotificationsService } from './notifications.service'
@@ -9,6 +10,7 @@ import { QueryNotificationsDto } from './dto/query-notifications.dto'
  * 通知是"发给我的"，不是"发给我们家的"，所以不需要 FamilyMemberGuard，
  * 权限完全由 userId 决定。
  */
+@ApiTags('通知')
 @Controller('notifications')
 export class NotificationsController {
   constructor(private readonly notifications: NotificationsService) {}

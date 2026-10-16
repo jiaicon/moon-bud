@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, UseGuards } from '@nestjs/common'
+import { ApiTags } from '@nestjs/swagger'
 import type { FamilyDto, InviteDto } from '@moonbud/shared'
 import { CurrentUser, type AuthUser } from '../auth/current-user.decorator'
 import { FamilyMemberGuard } from '../families/family-member.guard'
@@ -7,6 +8,7 @@ import { InvitesService } from './invites.service'
 import { CreateInviteDto } from './dto/create-invite.dto'
 
 /** 家庭内的邀请管理：发码、看码、撤销码。靠 FamilyMemberGuard 定权限。 */
+@ApiTags('邀请')
 @Controller('families/:familyId/invites')
 @UseGuards(FamilyMemberGuard)
 export class FamilyInvitesController {
@@ -43,6 +45,7 @@ export class FamilyInvitesController {
  * 还不知道自己会被加进哪个家庭——code 本身就是凭据。
  * 仍然需要登录：家庭需要一个确定的用户身份。
  */
+@ApiTags('邀请')
 @Controller('invites')
 export class InvitesController {
   constructor(private readonly invites: InvitesService) {}

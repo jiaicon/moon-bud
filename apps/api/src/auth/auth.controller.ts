@@ -1,4 +1,5 @@
 import { Body, Controller, HttpCode, Post } from '@nestjs/common'
+import { ApiTags } from '@nestjs/swagger'
 import { AuthService } from './auth.service'
 import { CurrentUser, type AuthUser } from './current-user.decorator'
 import { ChangePasswordDto } from './dto/change-password.dto'
@@ -10,6 +11,7 @@ import { Public } from './public.decorator'
 import { ResetRequestService } from './reset-request.service'
 import { TokenService } from './token.service'
 
+@ApiTags('鉴权')
 @Controller('auth')
 export class AuthController {
   constructor(

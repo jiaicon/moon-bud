@@ -9,6 +9,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common'
+import { ApiTags } from '@nestjs/swagger'
 import type { ChildDto } from '@moonbud/shared'
 import { FamilyMemberGuard } from '../families/family-member.guard'
 import { ChildrenService } from './children.service'
@@ -19,6 +20,7 @@ import { UpdateChildDto } from './dto/update-child.dto'
  * 孩子的增删改查。整个家庭共享同一批孩子，所以只要求"是成员"——
  * 把孩子限制给某个人管，与"照护是全家的事"这个前提冲突。
  */
+@ApiTags('孩子')
 @Controller('families/:familyId/children')
 @UseGuards(FamilyMemberGuard)
 export class ChildrenController {

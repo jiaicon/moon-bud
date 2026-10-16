@@ -43,7 +43,10 @@ export class OccurrencesService {
    * 同一分钟扫两次不会多出任何一行（spec 第 6 节）。
    */
   async materializeDue(now: Date = new Date()): Promise<number> {
-    const reminders = await this.prisma.reminder.findMany({ where: { status: 'ACTIVE' } })
+    // 归档家庭不参与调度：归档是硬边界，它的提醒不该继续产生实例与通知。
+    const reminders = await this.prisma.reminder.findMany({
+      where: { status: 'ACTIVE', family: { archivedAt: null } },
+    })
     let created = 0
 
     for (const reminder of reminders) {

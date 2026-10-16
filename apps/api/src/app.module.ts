@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { APP_GUARD } from '@nestjs/core'
+import { ScheduleModule } from '@nestjs/schedule'
 import { AuthModule } from './auth/auth.module'
 import { JwtAuthGuard } from './auth/jwt-auth.guard'
 import { ChildrenModule } from './children/children.module'
@@ -21,6 +22,8 @@ import { RemindersModule } from './reminders/reminders.module'
       envFilePath: ['../../.env', '.env'],
     }),
     PrismaModule,
+    // 每分钟的提醒扫描靠它注册 @Cron。
+    ScheduleModule.forRoot(),
     HealthModule,
     AuthModule,
     FamiliesModule,

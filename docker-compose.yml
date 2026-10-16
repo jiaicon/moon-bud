@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: moonbud-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-moonbud}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-moonbud_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-moonbud}
+    ports:
+      # 宿主端口用 5433：这台机器上已有本地 PostgreSQL 服务占用 5432，
+      # 两者同时监听会让连接被本地实例接走（表现为"角色不存在"），
+      # 而错误信息完全不会提示这一点。
+      - '5433:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-moonbud} -d ${POSTGRES_DB:-moonbud}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # v1 的后端也容器化部署。DATABASE_URL 用服务名 postgres，而非 localhost。
+  api:
+    build:
+      context: ./apps/api
+    container_name: moonbud-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-moonbud}:${POSTGRES_PASSWORD:-moonbud_dev}@postgres:5432/${POSTGRES_DB:-moonbud}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-2h}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-30d}
+    ports:
+      - '3000:3000'
+
+volumes:
+  pgdata:

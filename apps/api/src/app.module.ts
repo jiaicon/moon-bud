@@ -3,6 +3,8 @@ import { ConfigModule } from '@nestjs/config'
 import { APP_GUARD } from '@nestjs/core'
 import { AuthModule } from './auth/auth.module'
 import { JwtAuthGuard } from './auth/jwt-auth.guard'
+import { ChildrenModule } from './children/children.module'
+import { EventsModule } from './events/events.module'
 import { FamiliesModule } from './families/families.module'
 import { HealthModule } from './health/health.module'
 import { InvitesModule } from './invites/invites.module'
@@ -20,6 +22,8 @@ import { PrismaModule } from './prisma/prisma.module'
     AuthModule,
     FamiliesModule,
     InvitesModule,
+    ChildrenModule,
+    EventsModule,
   ],
   providers: [
     // 全局注册：新增路由默认受保护，忘记加守卫不会变成漏洞。

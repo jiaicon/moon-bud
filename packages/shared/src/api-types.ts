@@ -165,6 +165,11 @@ export interface AuthResponse {
 export interface MeResponse {
   user: UserDto
   families: FamilyDto[]
+  /**
+   * 冷启动只有 /me 可问：/auth/refresh 不返回这个布尔，
+   * 少了它，用临时密码登录后刷新一次页面，强制改密就再也拦不住。
+   */
+  mustChangePassword: boolean
 }
 
 export interface ApiError {

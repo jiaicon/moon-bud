@@ -6,7 +6,7 @@ vi.mock('../../api/endpoints', () => ({
   meApi: { get: vi.fn() },
 }))
 
-import { authApi } from '../../api/endpoints'
+import { authApi, meApi } from '../../api/endpoints'
 import { useAuthStore } from '../auth'
 
 const at = 'at'
@@ -59,5 +59,18 @@ describe('auth store', () => {
     expect(store.status).toBe('idle')
     expect(store.token).toBeNull()
     expect(authApi.refresh).not.toHaveBeenCalled()
+  })
+
+  it('bootstrap 从 /me 恢复强制改密标记：刷新页面后守卫仍然拦得住', async () => {
+    uni.setStorageSync('refreshToken', rt)
+    ;(authApi.refresh as ReturnType<typeof vi.fn>).mockResolvedValue({ accessToken: at, refreshToken: rt })
+    ;(meApi.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: loginResult.user,
+      families: [],
+      mustChangePassword: true,
+    })
+    const store = useAuthStore()
+    await store.bootstrap()
+    expect(store.mustChangePassword).toBe(true)
   })
 })

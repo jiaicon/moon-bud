@@ -107,6 +107,8 @@ export const useAuthStore = defineStore('auth', {
         this.token = tokens.accessToken
         const me = await meApi.get()
         this.user = me.user
+        // 强制改密标记必须由 /me 恢复：登录响应早就随刷新丢了。
+        this.mustChangePassword = me.mustChangePassword
         this.status = 'idle'
       } catch (err) {
         this.clearSession()

@@ -24,6 +24,7 @@ export class MeController {
 
     return {
       user: toUserDto(row),
+      mustChangePassword: row.mustChangePassword,
       families: memberships.map((m) => ({
         id: m.family.id,
         name: m.family.name,

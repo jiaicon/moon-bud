@@ -139,6 +139,13 @@ describe('密码', () => {
       .expect(200)
     expect(firstLogin.body.mustChangePassword).toBe(true)
 
+    // 冷启动静默续期后，客户端只能靠 /me 知道还要强制改密：refresh 不返回这个布尔。
+    const meDuringForced = await request(app.getHttpServer())
+      .get('/api/me')
+      .set('Authorization', `Bearer ${firstLogin.body.accessToken}`)
+      .expect(200)
+    expect(meDuringForced.body.mustChangePassword).toBe(true)
+
     // 临时密码凭据是一次性的：登录成功那一刻就作废（spec 第 5 节）。
     const pending = await prisma.passwordResetToken.findMany({
       where: { userId: b.body.user.id, usedAt: null },

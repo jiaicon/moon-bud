@@ -40,6 +40,7 @@ describe('会话', () => {
       .expect(200)
     expect(res.body.user.username).toBe('papa2024')
     expect(res.body.families).toEqual([])
+    expect(res.body.mustChangePassword).toBe(false)
   })
 
   it('篡改的 token 返回 401', async () => {

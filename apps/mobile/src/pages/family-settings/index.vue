@@ -79,7 +79,8 @@ async function archive(): Promise<void> {
     uni.showToast({ title: '已归档', icon: 'none' })
     uni.switchTab({ url: '/pages/home/index' })
   } else {
-    error.value = familyStore.error ?? '归档失败'
+    // 错误位挂在"改名"那块表单里，只有管理员看得见；破坏性操作的失败必须当场说。
+    uni.showToast({ title: familyStore.error ?? '归档失败', icon: 'none' })
   }
 }
 
@@ -100,7 +101,9 @@ async function leave(): Promise<void> {
     uni.showToast({ title: '已退出', icon: 'none' })
     uni.switchTab({ url: '/pages/home/index' })
   } else {
-    error.value = familyStore.error ?? '退出失败'
+    // 退出按钮对普通成员也开着，而 `error` 只画在管理员的改名表单下面：
+    // 写进 error 就等于没说话。
+    uni.showToast({ title: familyStore.error ?? '退出失败', icon: 'none' })
   }
 }
 

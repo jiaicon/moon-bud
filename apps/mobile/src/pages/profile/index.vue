@@ -6,6 +6,7 @@ import ThemeRoot from '../../components/ThemeRoot.vue'
 import ThemeSwitcher from '../../components/ThemeSwitcher.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useFamilyStore } from '../../stores/family'
+import { pickerOptions, timezoneLabel, type TimezoneOption } from '../../utils/timezone-options'
 
 const authStore = useAuthStore()
 const familyStore = useFamilyStore()
@@ -14,6 +15,24 @@ const unread = ref(0)
 
 const user = computed(() => authStore.user)
 const familyName = computed(() => familyStore.currentFamily?.name ?? '还没有家庭')
+
+const timezoneOptions = computed<TimezoneOption[]>(() => pickerOptions(user.value?.timezone ?? ''))
+const timezoneIndex = computed(() => {
+  const at = timezoneOptions.value.findIndex((o) => o.zone === user.value?.timezone)
+  return at < 0 ? 0 : at
+})
+const timezoneText = computed(() => (user.value ? timezoneLabel(user.value.timezone) : '未设置'))
+
+const savingTimezone = ref(false)
+
+async function onTimezoneChange(e: { detail: { value: string | number } }): Promise<void> {
+  const option = timezoneOptions.value[Number(e.detail.value)]
+  if (!option || savingTimezone.value || option.zone === user.value?.timezone) return
+  savingTimezone.value = true
+  const ok = await authStore.updateTimezone(option.zone)
+  savingTimezone.value = false
+  uni.showToast({ title: ok ? `已按${timezoneLabel(option.zone)}显示` : authStore.error ?? '保存失败', icon: 'none' })
+}
 
 async function refreshUnread(): Promise<void> {
   // 冷启动时 access token 还在路上（isLoggedIn 只是内存态）。不等会话落定就
@@ -80,6 +99,16 @@ onPullDownRefresh(() => {
 
       <view class="section">
         <text class="section__title">账号</text>
+        <picker :range="timezoneOptions" range-key="name" :value="timezoneIndex" @change="onTimezoneChange">
+          <view class="row">
+            <text class="row__label">时区</text>
+            <view class="row__left">
+              <text class="row__value">{{ timezoneText }}</text>
+              <text class="row__chevron">›</text>
+            </view>
+          </view>
+        </picker>
+        <text class="hint">改的是这些钟点读给谁看。已记下的时刻不变，已排好的提醒也在原来那一刻响——在新时区里看，它们会写成别的钟点。</text>
         <view class="row" @click="go('/pages/change-password/index')">
           <text class="row__label">修改密码</text>
           <text class="row__chevron">›</text>
@@ -212,6 +241,18 @@ onPullDownRefresh(() => {
 
 .row__chevron {
   font-size: 28rpx;
+  color: var(--mb-color-text-disabled);
+}
+
+.row__value {
+  font-size: 26rpx;
+  color: var(--mb-color-text-secondary);
+}
+
+.hint {
+  padding: 0 24rpx;
+  font-size: 22rpx;
+  line-height: 1.6;
   color: var(--mb-color-text-disabled);
 }
 

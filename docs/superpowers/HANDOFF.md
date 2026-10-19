@@ -167,8 +167,29 @@ MEMBER，邀请页把生成/撤销码画给了 MEMBER，而后端归档只认 OW
 
 
 
-### 踩过的坑，下次直接避开
+### 2026-10-19 深夜：两轮巡检 + 时区可改
 
+巡检 A/B 已入库（`08891a5`）：所有读路径按账号时区、PATCH 静默丢弃的字段收口、退出登录清
+本地通知排期、e2e 改走独立测试库。
+
+**时区可改（未提交）**：`PATCH /api/me` 只收 `timezone`（必填，`IsIanaTimezone`），"我的"页
+加了时区行与选择器（`utils/timezone-options.ts`：候选清单 + `UTC±H:MM` 由 Intl 墙上时间算出来，
+不用 `timeZoneName:'shortOffset'`，旧 webview 会抛）。注册页把 `deviceTimezone()` 的值念出来并指
+明去哪里改——这个值从前是静默写进账号的。改完只影响"怎么看"：记录与提醒存的是时刻，
+`reminders.timezone` 各自带着自己那一份，不会因为一个人换了城市就替全家改日程。
+
+**更正上面的一条**：e2e 不再 TRUNCATE 开发库。`test/setup-env.ts` 现在要求仓库根有 `.env.test`
+（gitignore，里面 `DATABASE_URL` 指向 `moonbud_test`），缺了就直接抛错拒绝启动。
+
+暂缓未修，下次别当新发现：
+- `invites.service.ts` 的 `usedCount` 是先读后写，同一码最后一个名额被两个请求撞进同一毫秒时
+  会多放进一个人。改成 `updateMany(where usedCount < maxUses)` 能收口，但这要求测试能先红，
+  并发交错复现不了，所以只在代码里注明了窗口。
+- 框架默认异常是英文（不存在的 route → `Cannot PATCH /api/me`、守卫 → `Unauthorized`），
+  会经 `http.ts` 原样显示。正常客户端打不到不存在的 route；我在开发中打到过一次，原因是常驻
+  API 跑的是旧 `dist`（见下条）。
+
+### 踩过的坑，下次直接避开
 - **`apps/api` 的常驻服务是 `node apps/api/dist/main.js`，改 `src` 不会生效。**
   验证后端行为前先 `pnpm --filter @moonbud/api build` 再重启，否则会拿旧二进制下结论。
 - **e2e 会 `TRUNCATE` 整个开发库**（`test/utils/db.ts`），浏览器验证用的账号随之消失；

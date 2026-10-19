@@ -7,6 +7,7 @@ import { normalizeInviteCode } from '../../invite/landing-url'
 import { useAuthStore } from '../../stores/auth'
 import { useFamilyStore } from '../../stores/family'
 import { useLoginForm, type LoginMode } from './use-login-form'
+import { timezoneLabel } from '../../utils/timezone-options'
 
 const authStore = useAuthStore()
 const familyStore = useFamilyStore()
@@ -122,6 +123,9 @@ async function onSubmit() {
           </view>
           <u-input v-model="form.nickname" placeholder="如：妈妈 / 外婆" :maxlength="20" />
           <text v-if="errors.nickname" class="field__error">{{ errors.nickname }}</text>
+          <text class="login__note">
+            这个账号会按{{ timezoneLabel(form.timezone) }}记时间，注册后也能在「我的 → 时区」里改。
+          </text>
         </view>
 
         <view v-if="mode === 'join'" class="field">
@@ -236,6 +240,13 @@ async function onSubmit() {
 .field__error {
   font-size: 22rpx;
   color: var(--mb-color-error);
+}
+
+/* 注册时才出现的一行说明：它说的是一个用户看不见就会被写进账号的值，所以不能省。 */
+.login__note {
+  font-size: 22rpx;
+  line-height: 1.6;
+  color: var(--mb-color-text-disabled);
 }
 
 .btn {

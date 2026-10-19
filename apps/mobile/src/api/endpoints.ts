@@ -15,6 +15,7 @@ import type {
   ReminderListFilter,
   ReminderOccurrenceDto,
   ThemePresetId,
+  UserDto,
 } from '@moonbud/shared'
 import { apiRequest, type Query } from './http'
 
@@ -68,6 +69,11 @@ export const authApi = {
 
 export const meApi = {
   get: () => apiRequest<MeResponse>('/me'),
+  /**
+   * PATCH /me 服务端只认 timezone，别的字段会被 whitelist 静默丢掉——类型上也就只给
+   * 这一个参数，免得以后有人顺手把昵称塞进来还以为改上了。
+   */
+  update: (timezone: string) => apiRequest<UserDto>('/me', { method: 'PATCH', data: { timezone } }),
 }
 
 export const familiesApi = {

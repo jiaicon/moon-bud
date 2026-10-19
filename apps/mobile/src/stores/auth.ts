@@ -91,6 +91,21 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
+    /**
+     * 账号时区是全屏"几点"的唯一依据，注册时它取自设备且看不见。改成功才写回
+     * user：失败时界面留着那个没保存上的值，比留着一个报错更糟。
+     */
+    async updateTimezone(timezone: string): Promise<boolean> {
+      this.clearError()
+      try {
+        this.user = await meApi.update(timezone)
+        return true
+      } catch (err) {
+        this.fail(err)
+        return false
+      }
+    },
+
     async logout(): Promise<void> {
       // 主动退出：之后在飞的请求 401 是预期内的，不该被当成"会话过期"再弹一次欢迎页。
       setSessionExpiredHandler(null)

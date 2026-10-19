@@ -63,6 +63,62 @@ describe('会话', () => {
       .expect(401)
   })
 
+  it('PATCH /api/me 改时区后返回新用户，/me 也回读到新值', async () => {
+    const res = await request(app.getHttpServer())
+      .patch('/api/me')
+      .set('Authorization', `Bearer ${tokens.accessToken}`)
+      .send({ timezone: 'Asia/Kolkata' })
+      .expect(200)
+    expect(res.body.timezone).toBe('Asia/Kolkata')
+
+    const me = await request(app.getHttpServer())
+      .get('/api/me')
+      .set('Authorization', `Bearer ${tokens.accessToken}`)
+      .expect(200)
+    expect(me.body.user.timezone).toBe('Asia/Kolkata')
+  })
+
+  it('PATCH /api/me 认不出的时区名报中文，且原值保持不动', async () => {
+    await request(app.getHttpServer())
+      .patch('/api/me')
+      .set('Authorization', `Bearer ${tokens.accessToken}`)
+      .send({ timezone: 'Mars/Olympus' })
+      .expect(400)
+
+    const me = await request(app.getHttpServer())
+      .get('/api/me')
+      .set('Authorization', `Bearer ${tokens.accessToken}`)
+      .expect(200)
+    expect(me.body.user.timezone).toBe('Asia/Shanghai')
+  })
+
+  it('PATCH /api/me 没有 timezone 就是 400：这一层只改这一件事，空 body 不算成功', async () => {
+    await request(app.getHttpServer())
+      .patch('/api/me')
+      .set('Authorization', `Bearer ${tokens.accessToken}`)
+      .send({})
+      .expect(400)
+
+    // whitelist 会静默丢掉不认识的字段，所以"只发一个没实现的字段"也落在这条 400 上，
+    // 而不是回一个 200 假装改成了昵称。
+    await request(app.getHttpServer())
+      .patch('/api/me')
+      .set('Authorization', `Bearer ${tokens.accessToken}`)
+      .send({ nickname: '妈妈' })
+      .expect(400)
+
+    const me = await request(app.getHttpServer())
+      .get('/api/me')
+      .set('Authorization', `Bearer ${tokens.accessToken}`)
+      .expect(200)
+    expect(me.body.user.timezone).toBe('Asia/Shanghai')
+    expect(me.body.user.nickname).toBe('爸爸')
+  })
+
+  it('无 token 不能 PATCH /api/me', async () => {
+    await request(app.getHttpServer()).patch('/api/me').send({ timezone: 'Asia/Tokyo' }).expect(401)
+  })
+
   it('登出后 refresh 失效', async () => {
     await request(app.getHttpServer())
       .post('/api/auth/logout')

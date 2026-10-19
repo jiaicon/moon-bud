@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../api/endpoints', () => ({
   authApi: { register: vi.fn(), login: vi.fn(), refresh: vi.fn(), changePassword: vi.fn(), logout: vi.fn() },
-  meApi: { get: vi.fn() },
+  meApi: { get: vi.fn(), update: vi.fn() },
 }))
 
 import { authApi, meApi } from '../../api/endpoints'
@@ -71,6 +71,33 @@ describe('auth store', () => {
     await store.login('mama2024', 'pass12345')
     await store.logout()
     expect(uni.getStorageSync('localNotifications')).toBe('')
+  })
+
+  it('改时区成功后把服务端返回的新用户写回 store：全屏的钟点都读这一个值', async () => {
+    ;(authApi.login as ReturnType<typeof vi.fn>).mockResolvedValue(loginResult)
+    const store = useAuthStore()
+    await store.login('mama2024', 'pass12345')
+
+    const next = { ...loginResult.user, timezone: 'Asia/Kolkata' }
+    ;(meApi.update as ReturnType<typeof vi.fn>).mockResolvedValue(next)
+    const ok = await store.updateTimezone('Asia/Kolkata')
+
+    expect(ok).toBe(true)
+    expect(meApi.update).toHaveBeenCalledWith('Asia/Kolkata')
+    expect(store.user?.timezone).toBe('Asia/Kolkata')
+  })
+
+  it('改时区失败时保留原值并给出可读错误：界面不能先显示一个没保存上的时区', async () => {
+    ;(authApi.login as ReturnType<typeof vi.fn>).mockResolvedValue(loginResult)
+    const store = useAuthStore()
+    await store.login('mama2024', 'pass12345')
+
+    ;(meApi.update as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('时区必须是合法的 IANA 名称，例如 Asia/Shanghai'))
+    const ok = await store.updateTimezone('Mars/Olympus')
+
+    expect(ok).toBe(false)
+    expect(store.user?.timezone).toBe('Asia/Shanghai')
+    expect(store.error).toContain('时区')
   })
 
   it('bootstrap 在无本地 refresh token 时保持未登录且不报错', async () => {

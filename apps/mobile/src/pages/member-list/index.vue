@@ -5,6 +5,7 @@ import { membersApi } from '../../api/endpoints'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useFamilyStore } from '../../stores/family'
+import { confirmDanger } from '../../utils/confirm'
 import type { FamilyRole, MemberDto } from '@moonbud/shared'
 
 const ROLE_LABEL: Record<FamilyRole, string> = {
@@ -71,6 +72,12 @@ async function changeRole(member: MemberDto, role: Exclude<FamilyRole, 'OWNER'>)
 }
 
 async function remove(member: MemberDto): Promise<void> {
+  const go = await confirmDanger({
+    title: `把「${member.displayName || member.nickname || member.username || '这位成员'}」移出家庭？`,
+    content: 'TA 会立刻看不到这个家庭的所有记录，也无法再用旧的邀请码进来；要回来得再生成一个邀请。TA 已经记下的内容不会因此删除。',
+    confirmText: '移出',
+  })
+  if (!go) return
   try {
     await membersApi.remove(familyId.value, member.id)
     target.value = null

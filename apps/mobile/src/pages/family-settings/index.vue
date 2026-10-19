@@ -5,6 +5,7 @@ import { familiesApi } from '../../api/endpoints'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useChildStore } from '../../stores/child'
 import { useFamilyStore } from '../../stores/family'
+import { confirmDanger } from '../../utils/confirm'
 import type { ChildDto } from '@moonbud/shared'
 
 const familyStore = useFamilyStore()
@@ -55,11 +56,18 @@ async function rename(): Promise<void> {
 }
 
 /**
- * 归档不删数据（spec 第 4 节）：记录还在，只是从这个账号的列表里消失。
- * 文案必须说清这一点，否则管理员会以为按下去就毁了孩子的记录。
+ * 归档不删数据（spec 第 4 节），但 v1 没有恢复入口：归档后这个家庭对全家所有人都不再可达
+ * （后端对 archivedAt != null 的家庭一律 403，邀请也不允许指向它）。
+ * 所以文案与确认框都必须照实说，不能写"重新加入即可看到"。
  */
 async function archive(): Promise<void> {
   if (!familyId.value) return
+  const go = await confirmDanger({
+    title: '归档这个家庭？',
+    content: '归档后，你和全家任何人都再也打不开它，当前版本也没有恢复入口。记录不会删除，但界面上看不到了。',
+    confirmText: '归档',
+  })
+  if (!go) return
   const ok = await familyStore.archive(familyId.value)
   if (ok) {
     uni.showToast({ title: '已归档', icon: 'none' })
@@ -70,6 +78,15 @@ async function archive(): Promise<void> {
 }
 
 async function removeChild(child: ChildDto): Promise<void> {
+  const go = await confirmDanger({
+    title: `移除「${child.name}」？`,
+    content: '记录不会删除，但这个孩子的历史会从全家的时间线里消失，当前版本没有找回入口。请先确认孩子不是被记错了名字。',
+    confirmText: '移除',
+  })
+  if (!go) {
+    childTarget.value = null
+    return
+  }
   const ok = await childStore.remove(familyId.value, child.id)
   childTarget.value = null
   if (!ok) uni.showToast({ title: childStore.error ?? '移除失败', icon: 'none' })
@@ -138,7 +155,7 @@ onShow(() => void load())
 
         <view v-if="isOwner" class="section">
           <text class="section__title">危险操作</text>
-          <text class="section__hint">归档后这个家庭从你的列表里消失，但记录不会删除；重新加入即可看到。</text>
+          <text class="section__hint">归档后这个家庭对全家所有人都不可访问。记录不会删除，但当前版本没有恢复入口 —— 请确认这是你想要的。</text>
           <view class="row row--danger" @click="archive">
             <text class="row__name row__name--danger">归档此家庭</text>
           </view>

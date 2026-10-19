@@ -32,6 +32,7 @@ describe('uView 变量桥接', () => {
     expect(vars['--u-type-error']).toBe(tokens.error)
     expect(vars['--u-type-success']).toBe(tokens.success)
     expect(vars['--u-type-warning']).toBe(tokens.warning)
+    expect(vars['--u-type-info']).toBe(tokens.info)
   })
 
   it('rgb 三元组由同一个十六进制算出来（uView 用 rgba(var(--u-x-rgb), .5)）', () => {

@@ -7,8 +7,8 @@ import FamilySwitcher from '../../components/FamilySwitcher.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { eventsApi, remindersApi } from '../../api/endpoints'
 import { EVENT_TYPE_META } from '../../events/event-fields'
-import { relativeTime } from '../../events/duplicate-warning'
 import { buildTodaySummary, type TodaySummary } from '../../events/summary'
+import { buildOverviewRows, decideHomeView } from './home-view'
 import { useAuthStore } from '../../stores/auth'
 import { useChildStore } from '../../stores/child'
 import { useFamilyStore } from '../../stores/family'
@@ -19,6 +19,8 @@ const childStore = useChildStore()
 
 const summary = ref<TodaySummary | null>(null)
 const loading = ref(false)
+const familyLoadFailed = ref(false)
+const overviewFailed = ref(false)
 
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
 const child = computed(() => childStore.currentChild(familyId.value))
@@ -27,6 +29,7 @@ const timezone = computed(() => authStore.user?.timezone ?? 'Asia/Shanghai')
 async function refresh(): Promise<void> {
   if (!familyId.value || !child.value) {
     summary.value = null
+    overviewFailed.value = false
     return
   }
   loading.value = true
@@ -41,12 +44,21 @@ async function refresh(): Promise<void> {
       reminders: reminders.items as ReminderDto[],
       timezone: timezone.value,
     })
+    overviewFailed.value = false
   } catch {
-    // 概览失败不弹错误：整屏空白换成"暂无"，用户仍能从这里记一笔。
+    // 失败要说"失败了"：summary 置空只用于算不出内容，界面另用 overviewFailed 分辨。
     summary.value = null
+    overviewFailed.value = true
   } finally {
     loading.value = false
   }
+}
+
+async function retry(): Promise<void> {
+  const ok = await familyStore.load()
+  familyLoadFailed.value = !ok
+  if (ok && familyId.value) await childStore.load(familyId.value)
+  await refresh()
 }
 
 /**
@@ -69,7 +81,7 @@ watch(
 )
 
 onLoad(async () => {
-  await familyStore.load()
+  familyLoadFailed.value = !(await familyStore.load())
   if (familyId.value) await childStore.load(familyId.value)
   await refresh()
 })
@@ -83,9 +95,17 @@ const goReminders = () => uni.switchTab({ url: '/pages/reminder-list/index' })
 const goChildForm = () => uni.navigateTo({ url: '/pages/child-form/index' })
 const goFamilySelect = () => uni.navigateTo({ url: '/pages/family-select/index' })
 const goEvent = (type: string) => uni.navigateTo({ url: `/pages/event-form/index?type=${type}` })
+const rowIcon = (key: string) =>
+  EVENT_TYPE_META[key as keyof typeof EVENT_TYPE_META].icon
 
-const feedingAt = computed(() => (summary.value?.lastFeeding ? relativeTime(summary.value.lastFeeding.occurredAt) : '今天还没有'))
-const sleepAt = computed(() => (summary.value?.lastSleep ? relativeTime(summary.value.lastSleep.occurredAt) : '今天还没有'))
+const view = computed(() =>
+  decideHomeView({
+    familyLoadFailed: familyLoadFailed.value,
+    familyId: familyId.value,
+    hasChild: !!child.value,
+  }),
+)
+const rows = computed(() => buildOverviewRows(summary.value, overviewFailed.value))
 const overdueCount = computed(() => summary.value?.overdueReminders.length ?? 0)
 </script>
 
@@ -97,13 +117,19 @@ const overdueCount = computed(() => summary.value?.overdueReminders.length ?? 0)
         <child-switcher @change="refresh" />
       </view>
 
-      <view v-if="!familyId" class="home__empty">
+      <view v-if="view === 'retry'" class="home__empty">
+        <text class="home__empty-title">家庭列表没加载出来</text>
+        <text class="home__hint">{{ familyStore.error ?? '网络或后端暂时不可用，重试一下即可。' }}</text>
+        <view class="btn" @click="retry"><text class="btn__label">重试</text></view>
+      </view>
+
+      <view v-else-if="view === 'create-family'" class="home__empty">
         <text class="home__empty-title">还没有家庭</text>
         <text class="home__hint">创建一个家庭，或凭邀请码加入家人的家庭。</text>
         <view class="btn" @click="goFamilySelect"><text class="btn__label">去创建或加入</text></view>
       </view>
 
-      <view v-else-if="!child" class="home__empty">
+      <view v-else-if="view === 'add-child'" class="home__empty">
         <text class="home__empty-title">还没有孩子</text>
         <text class="home__hint">记录都要挂在一个孩子身上，先添加一个。</text>
         <view class="btn" @click="goChildForm"><text class="btn__label">添加孩子</text></view>
@@ -114,26 +140,16 @@ const overdueCount = computed(() => summary.value?.overdueReminders.length ?? 0)
           <text class="alert__text">{{ overdueCount }} 条提醒已过期，点此查看</text>
         </view>
 
+        <view v-if="overviewFailed" class="alert alert--retry" @click="retry">
+          <text class="alert__text">概览没加载出来，点此重试（下面的数字现在不可信）</text>
+        </view>
+
         <view class="card">
-          <view class="card__row">
-            <text class="card__icon">{{ EVENT_TYPE_META.feeding.icon }}</text>
+          <view v-for="row in rows" :key="row.key" class="card__row">
+            <text class="card__icon">{{ rowIcon(row.key) }}</text>
             <view class="card__body">
-              <text class="card__label">最近喂奶</text>
-              <text class="card__value">{{ feedingAt }}</text>
-            </view>
-          </view>
-          <view class="card__row">
-            <text class="card__icon">{{ EVENT_TYPE_META.sleep.icon }}</text>
-            <view class="card__body">
-              <text class="card__label">最近睡眠</text>
-              <text class="card__value">{{ sleepAt }}</text>
-            </view>
-          </view>
-          <view class="card__row">
-            <text class="card__icon">{{ EVENT_TYPE_META.diaper.icon }}</text>
-            <view class="card__body">
-              <text class="card__label">今日换尿布</text>
-              <text class="card__value">{{ summary ? `${summary.diaperCount} 次` : '—' }}</text>
+              <text class="card__label">{{ row.label }}</text>
+              <text class="card__value" :class="{ 'card__value--failed': row.failed }">{{ row.value }}</text>
             </view>
           </view>
         </view>
@@ -193,6 +209,18 @@ const overdueCount = computed(() => summary.value?.overdueReminders.length ?? 0)
 
 .alert__text {
   font-size: 26rpx;
+  color: var(--mb-color-error);
+}
+
+.alert--retry {
+  background-color: var(--mb-color-error);
+}
+
+.alert--retry .alert__text {
+  color: var(--mb-color-on-primary);
+}
+
+.card__value--failed {
   color: var(--mb-color-error);
 }
 

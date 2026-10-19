@@ -7,6 +7,7 @@ import { canModifyEvent, stageForEdit } from '../../events/event-edit'
 import { EVENT_TYPE_META } from '../../events/event-fields'
 import { formatEventLine } from '../../events/format-event'
 import { confirmDanger } from '../../utils/confirm'
+import EmptyState from '../../components/EmptyState.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useChildStore } from '../../stores/child'
@@ -24,6 +25,13 @@ const page = ref(1)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const typeFilter = ref<EventType | ''>('')
+const typeSheetOpen = ref(false)
+
+/** 抽屉里要列全：横滑的 tabs 看不见不代表没有这一类。 */
+const typeOptions = computed<{ value: EventType | ''; label: string }[]>(() => [
+  { value: '', label: '全部' },
+  ...EVENT_TYPES.map((t) => ({ value: t, label: `${EVENT_TYPE_META[t].icon} ${EVENT_TYPE_META[t].label}` })),
+])
 
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
 const children = computed(() => childStore.childrenByFamily[familyId.value] ?? [])
@@ -116,6 +124,12 @@ function pickChild(next: string) {
   void load(true)
 }
 
+/** 抽屉里点一次就完事：选完立刻收起，不然用户还得再点一次遮罩。 */
+function chooseType(next: EventType | '') {
+  typeSheetOpen.value = false
+  pickType(next)
+}
+
 const goForm = () => uni.navigateTo({ url: '/pages/event-form/index' })
 const goFamily = () => uni.navigateTo({ url: '/pages/family-select/index' })
 const goChild = () => uni.navigateTo({ url: '/pages/child-form/index' })
@@ -157,95 +171,129 @@ async function removeEvent(event: EventDto): Promise<void> {
 <template>
   <theme-root>
     <view class="timeline">
-      <view v-if="!familyId" class="timeline__notice">
-        <text class="timeline__notice-text">还没有家庭，先创建一个才能记录。</text>
-        <view class="btn btn--ghost" @click="goFamily"><text class="btn__label">去创建家庭</text></view>
-      </view>
+      <empty-state
+        v-if="!familyId"
+        icon="🏠"
+        title="还没有家庭"
+        hint="创建一个家庭，全家才能共用同一份记录。"
+        action-label="去创建家庭"
+        @action="goFamily"
+      />
 
-      <view v-else-if="!childId" class="timeline__notice">
-        <text class="timeline__notice-text">这个家庭还没有孩子，先添加一个才能记。</text>
-        <view class="btn btn--ghost" @click="goChild"><text class="btn__label">添加孩子</text></view>
-      </view>
+      <empty-state
+        v-else-if="!childId"
+        icon="👶"
+        title="这个家庭还没有孩子"
+        hint="记录要有归属的孩子才记得下。"
+        action-label="添加孩子"
+        @action="goChild"
+      />
 
-      <view v-else class="timeline__filters">
-        <scroll-view scroll-x class="chips">
-          <view class="chip-row">
-            <view
-              class="chip"
-              :class="{ 'chip--active': typeFilter === '' }"
-              @click="pickType('')"
-            >
-              <text class="chip__label">全部</text>
-            </view>
-            <view
-              v-for="t in EVENT_TYPES"
-              :key="t"
-              class="chip"
-              :class="{ 'chip--active': typeFilter === t }"
-              @click="pickType(t)"
-            >
-              <text class="chip__label">{{ EVENT_TYPE_META[t].icon }} {{ EVENT_TYPE_META[t].label }}</text>
-            </view>
-          </view>
-        </scroll-view>
+      <template v-else>
+        <view class="timeline__filters">
+          <view class="filter-bar">
+            <scroll-view scroll-x class="chips" :show-scrollbar="false">
+              <view class="chip-row">
+                <view
+                  v-for="opt in typeOptions"
+                  :key="opt.value"
+                  class="chip"
+                  :class="{ 'chip--active': typeFilter === opt.value }"
+                  @click="pickType(opt.value)"
+                >
+                  <text class="chip__label">{{ opt.label }}</text>
+                </view>
+              </view>
+            </scroll-view>
 
-        <scroll-view v-if="children.length > 1" scroll-x class="chips">
-          <view class="chip-row">
-            <view
-              v-for="c in children"
-              :key="c.id"
-              class="chip"
-              :class="{ 'chip--active': c.id === childId }"
-              @click="pickChild(c.id)"
-            >
-              <text class="chip__label">{{ c.name }}</text>
+            <!-- 横滑看不见的类型在这里全给出来，按钮本身不跟着滚。 -->
+            <view class="expand" @click="typeSheetOpen = true">
+              <text class="expand__label">展开</text>
             </view>
           </view>
-        </scroll-view>
-      </view>
 
-      <text v-if="error" class="timeline__error">{{ error }}</text>
+          <scroll-view v-if="children.length > 1" scroll-x class="chips" :show-scrollbar="false">
+            <view class="chip-row">
+              <view
+                v-for="c in children"
+                :key="c.id"
+                class="chip"
+                :class="{ 'chip--active': c.id === childId }"
+                @click="pickChild(c.id)"
+              >
+                <text class="chip__label">{{ c.name }}</text>
+              </view>
+            </view>
+          </scroll-view>
+        </view>
 
-      <view v-for="group in groups" :key="group.key" class="group">
-        <text class="group__label">{{ group.label }}</text>
-        <view v-for="event in group.items" :key="event.id" class="card">
-          <view class="card__main" @click="editEvent(event)">
-            <text class="card__line">{{ formatEventLine(event) }}</text>
-            <text class="card__who">{{ event.createdByNickname }} 记 · 点此编辑</text>
-          </view>
-          <view class="card__delete" @click="removeEvent(event)">
-            <text class="card__delete-label">删除</text>
+        <text v-if="error" class="timeline__error">{{ error }}</text>
+
+        <view v-for="group in groups" :key="group.key" class="group">
+          <text class="group__label">{{ group.label }}</text>
+          <view v-for="event in group.items" :key="event.id" class="card">
+            <view class="card__main" @click="editEvent(event)">
+              <text class="card__line">{{ formatEventLine(event) }}</text>
+              <text class="card__who">{{ event.createdByNickname }} 记 · 点此编辑</text>
+            </view>
+            <view class="card__delete" @click="removeEvent(event)">
+              <text class="card__delete-label">删除</text>
+            </view>
           </view>
         </view>
-      </view>
 
-      <u-empty
-        v-if="!loading && !groups.length && !error"
-        mode="list"
-        text="还没有记录，点右下角记一笔"
-      />
-      <text v-if="loading" class="timeline__loading">加载中…</text>
+        <view v-if="groups.length" class="bottom-spacer" />
+
+        <empty-state
+          v-if="!loading && !groups.length && !error"
+          icon="🌱"
+          title="还没有记录"
+          hint="点右下角 ＋，喂奶、换尿布、睡觉都能记一条。"
+        />
+        <text v-if="loading" class="timeline__loading">加载中…</text>
+      </template>
 
       <view v-if="childId" class="fab" @click="goForm"><text class="fab__label">＋</text></view>
+
+      <u-popup
+        v-model="typeSheetOpen"
+        mode="right"
+        length="520rpx"
+        :safe-area-inset-bottom="true"
+        @close="typeSheetOpen = false"
+      >
+        <view class="sheet">
+          <text class="sheet__title">按类型筛选</text>
+          <view
+            v-for="opt in typeOptions"
+            :key="opt.value"
+            class="sheet__item"
+            :class="{ 'sheet__item--active': typeFilter === opt.value }"
+            @click="chooseType(opt.value)"
+          >
+            <text class="sheet__item-label">{{ opt.label }}</text>
+          </view>
+        </view>
+      </u-popup>
     </view>
   </theme-root>
 </template>
 
 <style scoped>
 .timeline {
-  padding: 24rpx 32rpx 160rpx;
-}
-
-.timeline__notice {
   display: flex;
   flex-direction: column;
   gap: 20rpx;
-  padding: 40rpx 0;
+  /* 可视区高度：状态栏/导航栏与 tabBar 各占掉的量由 uni-app 变量给出。 */
+  min-height: calc(100vh - var(--window-top) - var(--window-bottom));
+  padding: 24rpx 32rpx 40rpx;
+  box-sizing: border-box;
 }
 
-.timeline__notice-text {
-  font-size: 28rpx;
-  color: var(--mb-color-text-secondary);
+/* 列表末尾留白：高度让最后一张卡片能滚到 FAB 之上。空状态不给这段，
+   否则 min-height 会被内容顶开，"居中"就变成偏下。 */
+.bottom-spacer {
+  height: 140rpx;
 }
 
 .timeline__filters {
@@ -254,7 +302,16 @@ async function removeEvent(event: EventDto): Promise<void> {
   gap: 12rpx;
 }
 
+.filter-bar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12rpx;
+}
+
 .chips {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
 }
 
@@ -265,6 +322,7 @@ async function removeEvent(event: EventDto): Promise<void> {
 }
 
 .chip {
+  flex-shrink: 0;
   padding: 10rpx 22rpx;
   border-radius: 999rpx;
   background-color: var(--mb-color-surface-alt);
@@ -275,12 +333,57 @@ async function removeEvent(event: EventDto): Promise<void> {
 }
 
 .chip__label {
+  white-space: nowrap;
   font-size: 24rpx;
   color: var(--mb-color-text-secondary);
 }
 
 .chip--active .chip__label {
   color: var(--mb-color-on-primary);
+}
+
+.expand {
+  flex-shrink: 0;
+  padding: 10rpx 20rpx;
+  border-radius: 999rpx;
+  border: 1rpx solid var(--mb-color-border);
+  background-color: var(--mb-color-surface);
+}
+
+.expand__label {
+  font-size: 24rpx;
+  color: var(--mb-color-text-primary);
+}
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  padding: 60rpx 24rpx 40rpx;
+}
+
+.sheet__title {
+  margin-bottom: 16rpx;
+  font-size: 26rpx;
+  color: var(--mb-color-text-secondary);
+}
+
+.sheet__item {
+  padding: 22rpx 20rpx;
+  border-radius: 16rpx;
+}
+
+.sheet__item--active {
+  background-color: var(--mb-color-surface-alt);
+}
+
+.sheet__item-label {
+  font-size: 28rpx;
+  color: var(--mb-color-text-primary);
+}
+
+.sheet__item--active .sheet__item-label {
+  color: var(--mb-color-primary);
 }
 
 .timeline__error {
@@ -352,7 +455,8 @@ async function removeEvent(event: EventDto): Promise<void> {
 .fab {
   position: fixed;
   right: 40rpx;
-  bottom: 60rpx;
+  /* 不加 --window-bottom 的话，按钮的下半截正好被 tabBar 盖住。 */
+  bottom: calc(var(--window-bottom) + 40rpx);
   width: 108rpx;
   height: 108rpx;
   border-radius: 999rpx;
@@ -366,29 +470,5 @@ async function removeEvent(event: EventDto): Promise<void> {
 .fab__label {
   font-size: 48rpx;
   color: var(--mb-color-on-primary);
-}
-
-.btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 80rpx;
-  border-radius: 999rpx;
-  background-color: var(--mb-color-primary);
-}
-
-.btn--ghost {
-  align-self: flex-start;
-  padding: 0 32rpx;
-  background-color: var(--mb-color-surface-alt);
-}
-
-.btn__label {
-  font-size: 28rpx;
-  color: var(--mb-color-on-primary);
-}
-
-.btn--ghost .btn__label {
-  color: var(--mb-color-text-primary);
 }
 </style>

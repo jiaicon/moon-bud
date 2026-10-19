@@ -4,11 +4,17 @@ import { computed, ref } from 'vue'
 import { computeDueAt, type MemberDto, type ReminderDto, type ReminderListFilter } from '@moonbud/shared'
 import { membersApi, remindersApi } from '../../api/endpoints'
 import { cancelLocalNotification, scheduleLocalNotification } from '../../notifications/local-notify'
+import EmptyState from '../../components/EmptyState.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useFamilyStore } from '../../stores/family'
 
 const TABS = ['待办', '已过期', '已完成']
 const FILTERS: ReminderListFilter[] = ['ACTIVE', 'OVERDUE', 'DONE']
+const EMPTY_HINTS = [
+  '睡前的维生素、明天的体检，都可以让它替你记住。',
+  '该做的都按时做完了。',
+  '点一下"完成本次"，提醒就会归档到这里。',
+]
 
 const familyStore = useFamilyStore()
 
@@ -127,6 +133,7 @@ function pickTab(index: number): void {
 
 const goDetail = (id: string) => uni.navigateTo({ url: `/pages/reminder-form/index?id=${id}` })
 const goCreate = () => uni.navigateTo({ url: '/pages/reminder-form/index' })
+const goFamily = () => uni.navigateTo({ url: '/pages/family-select/index' })
 const goNotifications = () => uni.navigateTo({ url: '/pages/notification-center/index' })
 
 onLoad(async () => {
@@ -147,9 +154,14 @@ onShow(() => {
 <template>
   <theme-root>
     <view class="page">
-      <view v-if="!familyId" class="page__notice">
-        <text class="page__notice-text">还没有家庭，先创建一个才能设提醒。</text>
-      </view>
+      <empty-state
+        v-if="!familyId"
+        icon="🏠"
+        title="还没有家庭"
+        hint="创建一个家庭，提醒才能分给家人。"
+        action-label="去创建家庭"
+        @action="goFamily"
+      />
 
       <template v-else>
         <u-subsection :list="TABS" :current="tabIndex" active-color="var(--mb-color-primary)" @change="pickTab" />
@@ -174,30 +186,38 @@ onShow(() => {
           </view>
         </view>
 
-        <u-empty v-if="!loading && !reminders.length && !error" mode="list" :text="`没有${TABS[tabIndex]}的提醒`" />
+        <view v-if="reminders.length" class="bottom-spacer" />
+
+        <empty-state
+          v-if="!loading && !reminders.length && !error"
+          :icon="FILTERS[tabIndex] === 'DONE' ? '✅' : '⏰'"
+          :title="`没有${TABS[tabIndex]}的提醒`"
+          :hint="EMPTY_HINTS[tabIndex]"
+          action-label="＋ 设一个提醒"
+          @action="goCreate"
+        />
         <text v-if="loading" class="page__loading">加载中…</text>
       </template>
 
-      <view class="fab" @click="goCreate"><text class="fab__label">＋</text></view>
+      <view v-if="familyId" class="fab" @click="goCreate"><text class="fab__label">＋</text></view>
     </view>
   </theme-root>
 </template>
 
 <style scoped>
 .page {
-  padding: 24rpx 32rpx 160rpx;
   display: flex;
   flex-direction: column;
   gap: 20rpx;
+  min-height: calc(100vh - var(--window-top) - var(--window-bottom));
+  box-sizing: border-box;
+  padding: 24rpx 32rpx 40rpx;
 }
 
-.page__notice {
-  padding: 40rpx 0;
-}
-
-.page__notice-text {
-  font-size: 28rpx;
-  color: var(--mb-color-text-secondary);
+/* 列表末尾留白：高度让最后一张卡片能滚到 FAB 之上。空状态不给这段，
+   否则 min-height 会被内容顶开，"居中"就变成偏下。 */
+.bottom-spacer {
+  height: 140rpx;
 }
 
 .link-row {
@@ -280,7 +300,8 @@ onShow(() => {
 .fab {
   position: fixed;
   right: 40rpx;
-  bottom: 60rpx;
+  /* 不加 --window-bottom 的话，按钮的下半截正好被 tabBar 盖住。 */
+  bottom: calc(var(--window-bottom) + 40rpx);
   width: 108rpx;
   height: 108rpx;
   border-radius: 999rpx;

@@ -332,7 +332,6 @@ const goBack = () => uni.navigateBack()
 
 .field__input,
 .field__textarea {
-  padding: 18rpx 22rpx;
   border-radius: 16rpx;
   border: 1rpx solid var(--mb-color-border);
   background-color: var(--mb-color-surface);
@@ -342,7 +341,15 @@ const goBack = () => uni.navigateBack()
   box-sizing: border-box;
 }
 
+/* uni-app 把 uni-input 宿主定成 height:1.4em + overflow:hidden：宿主上的上下 padding
+   会把真正可输入的 inner input 挤成约 1px，打进去的字被裁掉。高度归宿主，padding 只留左右。 */
+.field__input {
+  height: 80rpx;
+  padding: 0 22rpx;
+}
+
 .field__textarea {
+  padding: 18rpx 22rpx;
   height: 140rpx;
 }
 

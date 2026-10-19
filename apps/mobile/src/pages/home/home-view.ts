@@ -36,18 +36,23 @@ export interface OverviewRow {
 const FAILED_TEXT = '没加载出来'
 const EMPTY_TEXT = '今天还没有'
 
-export function buildOverviewRows(summary: TodaySummary | null, failed: boolean): OverviewRow[] {
+export function buildOverviewRows(
+  summary: TodaySummary | null,
+  failed: boolean,
+  timezone: string,
+  now: Date = new Date(),
+): OverviewRow[] {
   const value = (text: string) => ({ value: failed ? FAILED_TEXT : text, failed })
   return [
     {
       key: 'feeding',
       label: '最近喂奶',
-      ...value(summary?.lastFeeding ? relativeTime(summary.lastFeeding.occurredAt) : EMPTY_TEXT),
+      ...value(summary?.lastFeeding ? relativeTime(timezone, summary.lastFeeding.occurredAt, now) : EMPTY_TEXT),
     },
     {
       key: 'sleep',
       label: '最近睡眠',
-      ...value(summary?.lastSleep ? relativeTime(summary.lastSleep.occurredAt) : EMPTY_TEXT),
+      ...value(summary?.lastSleep ? relativeTime(timezone, summary.lastSleep.occurredAt, now) : EMPTY_TEXT),
     },
     {
       key: 'diaper',

@@ -3,11 +3,14 @@ import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import type { Gender } from '@moonbud/shared'
 import ThemeRoot from '../../components/ThemeRoot.vue'
+import { useAuthStore } from '../../stores/auth'
 import { useChildStore } from '../../stores/child'
 import { useFamilyStore } from '../../stores/family'
+import { wallFields } from '../../utils/wall-time'
 
 const familyStore = useFamilyStore()
 const childStore = useChildStore()
+const authStore = useAuthStore()
 
 const GENDERS: { value: Gender; label: string }[] = [
   { value: 'MALE', label: '男宝' },
@@ -25,9 +28,12 @@ const saving = ref(false)
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
 const editing = computed(() => childId.value !== '')
 
-const today = new Date()
-/** 生日不可能在未来：把上限直接给到选择器，比让用户选了再报错好。 */
-const maxBirthday = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+const timezone = computed(() => authStore.user?.timezone ?? 'Asia/Shanghai')
+/**
+ * 生日不可能在未来：把上限直接给到选择器，比让用户选了再报错好。
+ * "今天"取账号时区的那一天 —— 设备那块表可能已经先到明天，也可能还在昨天。
+ */
+const maxBirthday = computed(() => wallFields(timezone.value).date)
 
 function validate(): boolean {
   const next: Record<string, string> = {}
@@ -35,7 +41,7 @@ function validate(): boolean {
   if (!trimmed) next.name = '请输入孩子姓名'
   else if (trimmed.length > 20) next.name = '姓名不超过 20 字'
   if (!birthday.value) next.birthday = '请选择出生日期'
-  else if (birthday.value > maxBirthday) next.birthday = '出生日期不能晚于今天'
+  else if (birthday.value > maxBirthday.value) next.birthday = '出生日期不能晚于今天'
   errors.value = next
   return Object.keys(next).length === 0
 }

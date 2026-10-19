@@ -97,7 +97,7 @@ async function loadDuplicateHint(next: EventType): Promise<void> {
   if (!familyId.value || !child.value) return
   try {
     const latest = await eventsApi.latest(familyId.value, child.value.id, next)
-    const hint = shouldWarnDuplicate({ latest: latest.event, type: next })
+    const hint = shouldWarnDuplicate({ latest: latest.event, type: next, timezone: timezone.value })
     duplicateHint.value = hint.warn ? hint.message : ''
   } catch {
     duplicateHint.value = ''
@@ -212,8 +212,7 @@ async function onSubmit(): Promise<void> {
   }
 
   saving.value = true
-  const body = {
-    childId,
+  const shared = {
     type: type.value,
     occurredAt: isoFromWallTime(timezone.value, date.value, time.value),
     endedAt:
@@ -225,10 +224,12 @@ async function onSubmit(): Promise<void> {
   }
   try {
     if (editingId.value) {
-      await eventsApi.update(familyId.value, editingId.value, body)
+      // PATCH 不收 childId：UpdateEventDto 里没有这个字段，whitelist 会静默丢掉它，
+      // 发过去只会让"已更新"这句话撒一次谎。记录属于哪个孩子，打开编辑时就定死了。
+      await eventsApi.update(familyId.value, editingId.value, shared)
       uni.showToast({ title: '已更新', icon: 'none' })
     } else {
-      await eventsApi.create(familyId.value, body)
+      await eventsApi.create(familyId.value, { childId, ...shared })
       uni.showToast({ title: '已记录', icon: 'none' })
     }
     setTimeout(() => uni.navigateBack(), 600)

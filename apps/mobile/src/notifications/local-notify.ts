@@ -64,3 +64,14 @@ export function cancelLocalNotification(id: string): void {
 export function rearmLocalNotifications(): void {
   rescheduleAll(readScheduled())
 }
+
+/**
+ * 退出登录时把所有排期撤掉。登记表存在设备级 storage 里，不清的话下一个账号
+ * 在这台手机上登录，仍会收到上一个账号那个家庭的"该喂药了"。
+ */
+export function clearLocalNotifications(): void {
+  uni.removeStorageSync(SCHEDULED_KEY)
+  // #ifdef APP-PLUS
+  plus.push.clear()
+  // #endif
+}

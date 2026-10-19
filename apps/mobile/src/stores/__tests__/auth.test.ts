@@ -62,6 +62,17 @@ describe('auth store', () => {
     expect(uni.getStorageSync('refreshToken')).toBe('')
   })
 
+  it('登出撤销上一个账号排下的本地通知：换账号登录不该再收到别人家的推送', async () => {
+    uni.setStorageSync('localNotifications', {
+      'r-1': { id: 'r-1', title: '喂药', body: '该喂药了', at: Date.now() + 3_600_000 },
+    })
+    ;(authApi.login as ReturnType<typeof vi.fn>).mockResolvedValue(loginResult)
+    const store = useAuthStore()
+    await store.login('mama2024', 'pass12345')
+    await store.logout()
+    expect(uni.getStorageSync('localNotifications')).toBe('')
+  })
+
   it('bootstrap 在无本地 refresh token 时保持未登录且不报错', async () => {
     const store = useAuthStore()
     await store.bootstrap()

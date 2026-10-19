@@ -95,6 +95,32 @@ describe('提醒', () => {
     }).expect(400)
   })
 
+  /**
+   * UpdateReminderDto 的 dueAt 是 `@IsOptional() @IsISO8601()`，而 @IsOptional 对 null
+   * 是"跳过校验"：null 会一路走到 `new Date(null)`，得到 1970-01-01。提醒不报错，
+   * 只是再也不会响——所以这里必须当场拒绝，而不是存下一个没人看得见的时刻。
+   */
+  it('PATCH 传 dueAt: null 会被拒绝，原来的时间还留着', async () => {
+    const created = await post({
+      childId,
+      title: '打疫苗',
+      type: 'ONE_TIME',
+      dueAt: '2026-12-01T00:00:00.000Z',
+    }).expect(201)
+
+    await request(app.getHttpServer())
+      .patch(`/api/families/${familyId}/reminders/${created.body.id}`)
+      .set('Authorization', `Bearer ${me.token}`)
+      .send({ dueAt: null })
+      .expect(400)
+
+    const after = await request(app.getHttpServer())
+      .get(`/api/families/${familyId}/reminders/${created.body.id}`)
+      .set('Authorization', `Bearer ${me.token}`)
+      .expect(200)
+    expect(after.body.dueAt).toBe('2026-12-01T00:00:00.000Z')
+  })
+
   it('省略 timezone 时取用户自己的时区', async () => {
     const res = await post({
       childId,

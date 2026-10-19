@@ -118,8 +118,8 @@ function sleepMinutes(event: EventDto): number | null {
 }
 
 /** 列表里一行的全部信息：类型 · 内容 · 多久以前。 */
-export function formatEventLine(event: EventDto, now?: Date): string {
+export function formatEventLine(event: EventDto, timezone: string, now?: Date): string {
   const detail = detailOf(event)
-  const when = relativeTime(event.occurredAt, now)
+  const when = relativeTime(timezone, event.occurredAt, now)
   return [EVENT_TYPE_META[event.type].label, detail, when].filter(Boolean).join(' · ')
 }

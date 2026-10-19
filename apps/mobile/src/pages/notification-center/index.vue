@@ -4,8 +4,11 @@ import { computed, ref } from 'vue'
 import { notificationsApi } from '../../api/endpoints'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { cancelLocalNotification } from '../../notifications/local-notify'
+import { useAuthStore } from '../../stores/auth'
+import { wallStamp } from '../../utils/wall-time'
 import type { NotificationDto } from '@moonbud/shared'
 
+const authStore = useAuthStore()
 const PAGE_SIZE = 30
 
 const items = ref<NotificationDto[]>([])
@@ -16,6 +19,8 @@ const error = ref<string | null>(null)
 const unreadOnly = ref(true)
 
 const hasMore = computed(() => items.value.length < total.value)
+/** 通知的时间按账号时区念：同屏的提醒卡片已经是它了，混用两块表只会自相矛盾。 */
+const timezone = computed(() => authStore.user?.timezone ?? 'Asia/Shanghai')
 
 /**
  * 切筛选、下拉、回到本页都可能并发。被"正在加载"挡掉的那一次会让分段标签
@@ -90,16 +95,18 @@ function toggleFilter(): void {
 const goReminders = () => uni.switchTab({ url: '/pages/reminder-list/index' })
 
 function fmt(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return ''
+  const stamp = wallStamp(timezone.value, at)
+  return `${stamp.month}月${stamp.day}日 ${stamp.clock}`
 }
 
 // onLoad 已经拉过，onShow 只管"从别处回到本页"，否则首屏发双份请求。
 let ready = false
 
 onLoad(async () => {
+  // 深链/冷启动直接进这一页时 user 还是 null，时区会退回兜底值，第一屏就念错钟点。
+  if (!authStore.user) await authStore.bootstrap()
   await load(true)
   ready = true
 })

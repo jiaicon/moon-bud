@@ -27,4 +27,19 @@ describe('记录表单不会把用户填的东西丢掉', () => {
     expect(source).toMatch(/errors\.end = /)
     expect(source).toMatch(/v-if="errors\.end"/)
   })
+
+  /**
+   * 3. UpdateEventDto 没有 childId，而全局 ValidationPipe 是 whitelist 且不禁额外字段：
+   *    编辑时发过去的 childId 被丢掉，还是 200，界面写着"已更新"。要么别发，
+   *    要么就得真的支持"把记录挪到另一个孩子"——那是另一件事。
+   */
+  it('编辑记录时不发 childId，PATCH 根本不收', () => {
+    expect(source).not.toMatch(/eventsApi\.update\([^)]*childId/)
+    expect(source).toMatch(/await eventsApi\.update\(familyId\.value, editingId\.value, shared\)/)
+  })
+
+  it('客户端的类型也不再声称记录可以换孩子', () => {
+    const api = readFileSync(join(srcDir, 'api/endpoints.ts'), 'utf8')
+    expect(api).toMatch(/input: Partial<Omit<EventCreateInput, 'childId'>>/)
+  })
 })

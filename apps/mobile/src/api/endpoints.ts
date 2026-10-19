@@ -50,6 +50,12 @@ export interface ReminderCreateInput {
   assigneeId?: string | null
 }
 
+/**
+ * PATCH 的 dueAt 只接受一个时刻：DTO 的 @IsOptional 对 null 是直接放行校验的，
+ * 而服务端 new Date(null) 会得到 1970-01-01 —— 提醒不报错，只是再也不会响。
+ */
+export type ReminderUpdateInput = Partial<Omit<ReminderCreateInput, 'dueAt'>> & { dueAt?: string }
+
 export const authApi = {
   register: (input: RegisterInput) => apiRequest<AuthResponse>('/auth/register', { method: 'POST', data: input, auth: false }),
   login: (username: string, password: string) => apiRequest<AuthResponse>('/auth/login', { method: 'POST', data: { username, password }, auth: false }),
@@ -77,8 +83,10 @@ export const familiesApi = {
 
 export const membersApi = {
   list: (familyId: string) => apiRequest<MemberDto[]>(`/families/${familyId}/members`),
-  updateRole: (familyId: string, memberId: string, role: Exclude<FamilyRole, 'OWNER'>, displayName?: string | null) =>
-    apiRequest<MemberDto>(`/families/${familyId}/members/${memberId}`, { method: 'PATCH', data: { role, displayName } }),
+  // 只改角色：displayName 那个形参从来没人传，而 DTO 的 @IsOptional 对 null 是直接放行校验的，
+  // 传下去会真的把家人给自己起的备注名清掉。
+  updateRole: (familyId: string, memberId: string, role: Exclude<FamilyRole, 'OWNER'>) =>
+    apiRequest<MemberDto>(`/families/${familyId}/members/${memberId}`, { method: 'PATCH', data: { role } }),
   remove: (familyId: string, memberId: string) => apiRequest<void>(`/families/${familyId}/members/${memberId}`, { method: 'DELETE' }),
   resetPassword: (familyId: string, memberId: string) =>
     apiRequest<{ temporaryPassword: string }>(`/families/${familyId}/members/${memberId}/reset-password`, { method: 'POST' }),
@@ -104,7 +112,9 @@ export const childrenApi = {
 export const eventsApi = {
   list: (familyId: string, query?: Query) => apiRequest<Paginated<EventDto>>(`/families/${familyId}/events`, { query }),
   create: (familyId: string, input: EventCreateInput) => apiRequest<EventDto>(`/families/${familyId}/events`, { method: 'POST', data: input }),
-  update: (familyId: string, eventId: string, input: Partial<EventCreateInput>) =>
+  // PATCH 没有 childId 这个字段（UpdateEventDto），whitelist 会静默丢掉：
+  // 类型里也不许出现"把记录挪到另一个孩子"这种承诺。
+  update: (familyId: string, eventId: string, input: Partial<Omit<EventCreateInput, 'childId'>>) =>
     apiRequest<EventDto>(`/families/${familyId}/events/${eventId}`, { method: 'PATCH', data: input }),
   remove: (familyId: string, eventId: string) => apiRequest<void>(`/families/${familyId}/events/${eventId}`, { method: 'DELETE' }),
   latest: (familyId: string, childId: string, type: EventDto['type']) =>
@@ -116,7 +126,7 @@ export const remindersApi = {
     apiRequest<Paginated<ReminderDto>>(`/families/${familyId}/reminders`, { query: { status, ...query } }),
   create: (familyId: string, input: ReminderCreateInput) => apiRequest<ReminderDto>(`/families/${familyId}/reminders`, { method: 'POST', data: input }),
   get: (familyId: string, reminderId: string) => apiRequest<ReminderDto>(`/families/${familyId}/reminders/${reminderId}`),
-  update: (familyId: string, reminderId: string, input: Partial<ReminderCreateInput>) =>
+  update: (familyId: string, reminderId: string, input: ReminderUpdateInput) =>
     apiRequest<ReminderDto>(`/families/${familyId}/reminders/${reminderId}`, { method: 'PATCH', data: input }),
   complete: (familyId: string, reminderId: string, occurrenceId?: string | null) =>
     apiRequest<ReminderDto>(`/families/${familyId}/reminders/${reminderId}/complete`, { method: 'POST', data: { occurrenceId } }),

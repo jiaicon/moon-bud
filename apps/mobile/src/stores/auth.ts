@@ -3,6 +3,7 @@ import type { UserDto } from '@moonbud/shared'
 import { ApiRequestError } from '../api/errors'
 import { renewAccessToken, setAccessToken, setRefreshHandler, setSessionExpiredHandler } from '../api/http'
 import { authApi, meApi } from '../api/endpoints'
+import { clearLocalNotifications } from '../notifications/local-notify'
 import { clearPreviewVisited } from '../utils/preview-visited'
 
 const REFRESH_TOKEN_KEY = 'refreshToken'
@@ -157,6 +158,7 @@ export const useAuthStore = defineStore('auth', {
     clearSession() {
       setAccessToken(null)
       uni.setStorageSync(REFRESH_TOKEN_KEY, '')
+      clearLocalNotifications()
       this.token = null
       this.user = null
       this.mustChangePassword = false

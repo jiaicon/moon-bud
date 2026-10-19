@@ -101,6 +101,18 @@ pnpm test:shared        # 共享契约单测
 
 后端 e2e **不用 sqlite 替身**：JSONB、`unique` 约束、`timestamptz` 的行为必须真实，替身会把这些差异藏起来。因此第 4 步的数据库必须先起来。
 
+e2e 每个 suite 都会 `TRUNCATE` 全部业务表，所以它**只连 `.env.test` 里指定的独立测试库**（`test/setup-env.ts` 少了这个文件就当场报错，绝不退回第 4 步那份开发 `.env`）。第一次跑之前建一次：
+
+```bash
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d postgres \
+  -c "CREATE DATABASE moonbud_test OWNER \"$POSTGRES_USER\";"
+echo "DATABASE_URL=postgresql://<用户>:<密码>@localhost:5433/moonbud_test" > .env.test
+set -a; . ./.env.test; set +a                             # prisma CLI 只认环境变量
+pnpm --filter @moonbud/api exec prisma migrate deploy   # 在测试库里建表
+```
+
+`.env.test` 已在 `.gitignore` 里（里面有密码），也别把它指向开发库。
+
 ---
 
 ## 常用脚本

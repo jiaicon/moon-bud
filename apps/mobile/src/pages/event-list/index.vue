@@ -216,7 +216,7 @@ async function removeEvent(event: EventDto): Promise<void> {
   }
   const go = await confirmDanger({
     title: '删掉这条记录？',
-    content: `${formatEventLine(event)} —— ${event.createdByNickname} 记的。删掉后全家都看不到它了。`,
+    content: `${formatEventLine(event, timezone.value)} —— ${event.createdByNickname} 记的。删掉后全家都看不到它了。`,
     confirmText: '删除',
   })
   if (!go) return
@@ -320,7 +320,7 @@ async function removeEvent(event: EventDto): Promise<void> {
           <text class="group__label">{{ group.label }}</text>
           <view v-for="event in group.items" :key="event.id" class="card">
             <view class="card__main" @click="editEvent(event)">
-              <text class="card__line">{{ formatEventLine(event) }}</text>
+              <text class="card__line">{{ formatEventLine(event, timezone) }}</text>
               <text class="card__who">{{ event.createdByNickname }} 记 · 点此编辑</text>
             </view>
             <view class="card__delete" @click="removeEvent(event)">

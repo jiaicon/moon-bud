@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator'
+import { IsIn, IsOptional, IsString, MaxLength, MinLength, ValidateIf } from 'class-validator'
 import type { FamilyRole } from '@prisma/client'
 
 /**
@@ -13,7 +13,8 @@ export class UpdateMemberDto {
   @IsIn(['ADMIN', 'MEMBER'])
   role?: Extract<FamilyRole, 'ADMIN' | 'MEMBER'>
 
-  @IsOptional()
+  /** 与提醒的 dueAt 同一件事：@IsOptional 把 null 当成"没填"而放行，备注名会被抹掉。 */
+  @ValidateIf((o: UpdateMemberDto) => o.displayName !== undefined)
   @IsString()
   @MinLength(1)
   @MaxLength(20)

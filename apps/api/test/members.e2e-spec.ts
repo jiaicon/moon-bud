@@ -147,6 +147,28 @@ describe('成员管理', () => {
     expect(res.body.displayName).toBe('奶奶')
   })
 
+  /**
+   * 同上：@IsOptional 让 null 绕过 @MinLength(1)，直接写进库，
+   * 家人给自己起的备注名就这么被抹掉了。要清空请显式走一条设计过的路。
+   */
+  it('PATCH 传 displayName: null 会被拒绝，备注名还在', async () => {
+    await seedMember(member.id, 'MEMBER')
+    const rowId = await memberRowId(member.id)
+    await request(app.getHttpServer())
+      .patch(`/api/families/${familyId}/members/${rowId}`)
+      .set('Authorization', `Bearer ${owner.token}`)
+      .send({ displayName: '奶奶' })
+      .expect(200)
+
+    await request(app.getHttpServer())
+      .patch(`/api/families/${familyId}/members/${rowId}`)
+      .set('Authorization', `Bearer ${owner.token}`)
+      .send({ displayName: null })
+      .expect(400)
+
+    expect((await listMembers(member.token)).find((m) => m.userId === member.id)?.displayName).toBe('奶奶')
+  })
+
   it('不能通过成员接口把自己提成 OWNER（所有权只能靠转让）', async () => {
     await seedMember(admin.id, 'ADMIN')
     const rowId = await memberRowId(admin.id)

@@ -21,7 +21,9 @@ function toInviteDto(invite: FamilyInvite): InviteDto {
   return {
     id: invite.id,
     code: invite.code,
-    role: invite.role,
+    // 收窄到 ADMIN|MEMBER：列上的枚举带着 OWNER，但邀请只能由 CreateInviteDto 建，
+    // 那里就只收这两个值。所有权不通过一条链接发出去。
+    role: invite.role as InviteDto['role'],
     expiresAt: invite.expiresAt.toISOString(),
     maxUses: invite.maxUses,
     usedCount: invite.usedCount,
@@ -131,6 +133,10 @@ export class InvitesService {
         return toFamilyDto(invite.family, existing.role)
       }
 
+      // 已知窗口：这两步之间是"先读后写"，同一码的最后一次名额被两个并发请求
+      // 同时抢到时，会多放进一个人。要收口就得把校验并进更新本身
+      // （updateMany where usedCount < maxUses，count 为 0 即失败），
+      // 现按"家庭内部邀请码、误用要正好撞在同一毫秒"接受。
       if (invite.usedCount >= invite.maxUses) {
         throw new BadRequestException(INVALID_INVITE)
       }

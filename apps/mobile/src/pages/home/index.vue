@@ -122,7 +122,7 @@ const view = computed(() =>
     childrenLoadFailed: childrenLoadFailed.value,
   }),
 )
-const rows = computed(() => buildOverviewRows(summary.value, overviewFailed.value))
+const rows = computed(() => buildOverviewRows(summary.value, overviewFailed.value, timezone.value))
 const overdueCount = computed(() => summary.value?.overdueReminders.length ?? 0)
 </script>
 

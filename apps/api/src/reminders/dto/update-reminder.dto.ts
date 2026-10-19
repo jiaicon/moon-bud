@@ -1,4 +1,4 @@
-import { IsISO8601, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator'
+import { IsISO8601, IsOptional, IsString, IsUUID, MaxLength, MinLength, ValidateIf } from 'class-validator'
 import { IsIanaTimezone } from '../../common/validators/is-iana-timezone'
 
 /**
@@ -22,7 +22,11 @@ export class UpdateReminderDto {
   @MaxLength(500)
   note?: string | null
 
-  @IsOptional()
+  /**
+   * `@IsOptional()` 对 null 是"跳过校验"，null 会一路走到 `new Date(null)` —— 提醒
+   * 从此躺在 1970 年里，界面还是 200。改成：要么不传，要么传一个真正的 ISO 时刻。
+   */
+  @ValidateIf((o: UpdateReminderDto) => o.dueAt !== undefined)
   @IsISO8601()
   dueAt?: string
 

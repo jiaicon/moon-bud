@@ -51,7 +51,7 @@ describe('首页视图判定', () => {
   })
 
   it('概览失败时三行都标成失败，而不是"今天还没有"', () => {
-    const rows = buildOverviewRows(null, true)
+    const rows = buildOverviewRows(null, true, 'Asia/Shanghai')
     expect(rows).toHaveLength(3)
     for (const row of rows) {
       expect(row.value).toBe('没加载出来')
@@ -60,15 +60,26 @@ describe('首页视图判定', () => {
   })
 
   it('加载成功但当天没有记录 → 才是"今天还没有"', () => {
-    const rows = buildOverviewRows(null, false)
+    const rows = buildOverviewRows(null, false, 'Asia/Shanghai')
     expect(rows.every((r) => !r.failed)).toBe(true)
     expect(rows.map((r) => r.value)).toEqual(['今天还没有', '今天还没有', '0 次'])
   })
 
   it('有数据时按数据渲染，尿布按今日计数', () => {
-    const rows = buildOverviewRows(summary, false)
+    const rows = buildOverviewRows(summary, false, 'Asia/Shanghai')
     expect(rows[0].value).not.toBe('今天还没有')
     expect(rows[1].value).toBe('今天还没有')
     expect(rows[2].value).toBe('2 次')
+  })
+
+  /**
+   * 概览行是"多久以前"退成绝对日期的那一类文案：家人不在同一块表上时，
+   * 按设备本地念会让上海的 10月19日 变成洛杉矶的 10月18日。
+   */
+  it('最近喂奶念的是账号时区里的钟点', () => {
+    // 同一个时刻：上海是 10月19日 14:00，洛杉矶还是 10月18日 23:00。
+    const now = new Date('2026-10-21T04:00:00.000Z')
+    expect(buildOverviewRows(summary, false, 'Asia/Shanghai', now)[0].value).toBe('昨天 14:00')
+    expect(buildOverviewRows(summary, false, 'America/Los_Angeles', now)[0].value).toBe('昨天 23:00')
   })
 })

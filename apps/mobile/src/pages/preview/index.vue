@@ -10,6 +10,9 @@ import { markPreviewVisited } from '../../utils/preview-visited'
 
 markPreviewVisited()
 
+// 游客预览用的是 mock 家庭，它没有账号时区可查，就按样例数据写死的那一个念。
+const PREVIEW_TIMEZONE = 'Asia/Shanghai'
+
 const clock = (iso: string): string => {
   const d = new Date(iso)
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -76,7 +79,7 @@ const go = (url: string) => uni.navigateTo({ url })
         <view v-for="event in MOCK_EVENTS.slice(0, 4)" :key="event.id" class="card card--row">
           <view class="card__dot" :style="{ backgroundColor: event.type === 'feeding' ? 'var(--mb-color-primary)' : 'var(--mb-color-surface-alt)' }" />
           <view class="card__main">
-            <text class="card__title">{{ formatEventLine(event) }}</text>
+            <text class="card__title">{{ formatEventLine(event, PREVIEW_TIMEZONE) }}</text>
             <text class="card__meta">{{ event.createdByNickname }}{{ event.note ? ` · ${event.note}` : '' }}</text>
           </view>
         </view>

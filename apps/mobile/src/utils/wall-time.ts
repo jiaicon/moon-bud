@@ -25,17 +25,30 @@ export function isoFromWallTime(timezone: string, day: string, minute: string): 
   return new Date(clock.year, clock.month - 1, clock.day, clock.hour, clock.minute).toISOString()
 }
 
-/** 某个时刻在账号时区里的日期与钟点，用来给日期选择器预填"现在"。 */
-export function wallFields(timezone: string, now: Date = new Date()): { date: string; time: string } {
-  const clock = wallClockAt(timezone, now)
+/** 某个时刻在账号时区里的年月日与钟点，用来写"10月19日 09:30"这类文案。 */
+export function wallStamp(
+  timezone: string,
+  instant: Date,
+): { year: number; month: number; day: number; clock: string } {
+  const clock = wallClockAt(timezone, instant)
   if (clock) {
     return {
-      date: `${clock.year}-${pad(clock.month)}-${pad(clock.day)}`,
-      time: `${pad(clock.hour)}:${pad(clock.minute)}`,
+      year: clock.year,
+      month: clock.month,
+      day: clock.day,
+      clock: `${pad(clock.hour)}:${pad(clock.minute)}`,
     }
   }
   return {
-    date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
-    time: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
+    year: instant.getFullYear(),
+    month: instant.getMonth() + 1,
+    day: instant.getDate(),
+    clock: `${pad(instant.getHours())}:${pad(instant.getMinutes())}`,
   }
+}
+
+/** 某个时刻在账号时区里的日期与钟点，用来给日期选择器预填"现在"。 */
+export function wallFields(timezone: string, now: Date = new Date()): { date: string; time: string } {
+  const stamp = wallStamp(timezone, now)
+  return { date: `${stamp.year}-${pad(stamp.month)}-${pad(stamp.day)}`, time: stamp.clock }
 }

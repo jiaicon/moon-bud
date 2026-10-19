@@ -16,6 +16,12 @@ const storage = new Map<string, unknown>()
   },
 }
 
+// 条件编译（// #ifdef APP-PLUS）只有 uni 的编译器会剥离，vitest 跑的是原始 TS，
+// 里面的 plus 调用会真的执行。给一个空壳：单元测试只核对 storage，不验证原生排期。
+;(globalThis as Record<string, unknown>).plus = {
+  push: { clear: () => {}, createMessage: () => {} },
+}
+
 // baseURL 是构建期注入的配置；测试里给一个非 localhost 的值，
 // 以免 env.ts 的"缺配置即抛错"把每个用例都炸掉。
 process.env.VITE_API_BASE_URL ||= 'http://env-test/api'

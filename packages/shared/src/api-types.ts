@@ -145,7 +145,8 @@ export interface NotificationDto {
 export interface InviteDto {
   id: string
   code: string
-  role: FamilyRole
+  /** 邀请只能带 ADMIN / MEMBER：所有权不通过链接发放（见 create-invite.dto.ts）。 */
+  role: InviteRole
   expiresAt: string
   maxUses: number
   usedCount: number

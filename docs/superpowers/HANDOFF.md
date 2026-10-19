@@ -6,7 +6,7 @@
 |---|---|---|
 | `2026-10-16-shared-contract.md` | **3/3 完成并关闭** | `fe649ee` `cfb0172` `72bc9f9` `e484787` |
 | `2026-10-16-api-backend.md` | **13/13 完成** | 基线 `e484787`，15 个提交（见下） |
-| `2026-10-16-mobile-app.md` | **0/9 未开始** —— 先写计划再动手 | 计划文档尚不存在，需先按 spec 撰写 |
+| `2026-10-16-mobile-app.md` | **9/9 完成 + 终审修复已入库（尚未 push/合并决策）** | 见下"移动端计划状态" |
 
 api-backend 的提交（`git log --oneline e484787..HEAD`）：
 
@@ -109,3 +109,75 @@ dfb9ee4 feat(api): add member management with last-owner invariant
   这个未跟踪目录（以及它带来的 peer 后缀变动）。**不要**单独提交它——
   那会给一个 git 不跟踪的目录声明 importer；等 mobile 计划把
   `apps/mobile` 纳入版本管理时一起提交。
+  （mobile 计划已把 `apps/mobile` 入库，lock 也随各 task 一起提交了；这条现在只是历史说明。）
+
+## 移动端计划状态（2026-10-19 更新）
+
+`2026-10-16-mobile-app.md` 的 9 个 task 全部完成，随后做了一次全新上下文的整支终审
+（`review-package`，范围 `dd6dd91..0d534aa`），并按用户圈定的范围修完了 4 个 Critical
+加两条写路径缺口。当前门禁：`pnpm --filter @moonbud/mobile test` 118/118、
+`type-check` 干净、`build:h5` 成功；`pnpm --filter @moonbud/api test:e2e` 131/131、
+`typecheck` 干净。
+
+### 终审后已修
+
+- **C-1** 深色模式下 uView 自带表面仍是白底（`theme/uview-bridge.ts` 桥接 `--u-*`，
+  并由 `ThemeRoot` 在**每个平台**把两套变量绑在页面根节点上——uView 把默认值声明在
+  `:root, page` 上，`page` 比 documentElement 离内容更近，只注入根元素会被盖掉）。
+- **C-2** 加载失败被渲染成"今天还没有"（`pages/home/home-view.ts` 纯函数 + 重试入口 +
+  "下面的数字现在不可信"红条）。
+- **C-3** 冷启动并发续期把赢家的新凭证删掉（`http.ts` 的 `renewAccessToken()` single-flight；
+  `auth.bootstrap` 只在 refresh token 仍是本次开始那一张时才 `clearSession`）。
+- **C-4** 破坏性操作一键生效且归档文案是假的（`utils/confirm.ts` 的 `confirmDanger`；
+  归档改为实话："当前版本没有恢复入口"）。
+- **I-8** 记录可以改可以删了（`events/event-edit.ts`：表单按记录原时刻回填、
+  权限镜像 `events.service.ts:212-214`，列表卡片点开即编辑、右侧删除带确认）。
+- **I-12** 找回请求真的会通知同家庭的其他 OWNER/ADMIN（站内通知，10 分钟冷却），
+  页面文案同步。
+
+### 仍然欠着的（用户明确排除在本轮之外）
+
+`I-4` 退出家庭/转让所有权没有 UI；`I-5` 原生 tabBar/导航栏写死在 `pages.json`，
+没有 `setTabBarStyle`/`setNavigationBarColor`（深色模式上下两条栏是白的，且
+`#4A7FB5` 是没过 WCAG 的旧雾蓝）；`I-6` 记录页下拉刷新可能永远转圈
+（`if (loading) return` 早于 `finally`）；`I-7` 换家庭后记录页不重载孩子缓存，
+"有孩子的家庭被告知没有孩子"且列表混全家记录；`I-9` 周期提醒停不掉
+（`remindersApi.cancel` 无调用点）；`I-11` 孩子不能编辑（`childrenApi.update` 无调用点）；
+`I-13` 邀请二维码指向 `/join` 落地页而客户端没有这个页面（计划本身就漏了这个 task，
+`VITE_INVITE_BASE_URL` 默认也没配）；`I-14` 二维码按主题绘制，深色=反色码，微信解码不可靠。
+`endpoints.ts` 里现在还剩这些零调用点函数：`remindersApi.cancel` / `occurrences`、
+`familiesApi.leave` / `transfer`、`childrenApi.update`——按"死掉的客户端 API 就是没人做的
+spec 条目"来读。
+
+11 条 Minor（终审 M-1…M-11，全部记账未修）：`M-1` access token 落盘（与 spec §5"仅内存"
+冲突，是有意取舍：冷启动免登录要能续，泄露的是 2h JWT 而非长期凭证）；`M-2` 加入成功后靠
+隐式回退选中家庭，没有显式 `switchFamily`；`M-3` `auto` 模式只在启动时读一次系统主题，
+没有 `onThemeChange` 监听；`M-4` 记录/提醒列表按**设备**时区分组，摘要按**账号**时区，
+跨时区家庭会串日；`M-5` `previewVisited` 永不清除，注册过的回访用户仍被标成"继续注册"；
+`M-6` `childStore.remove` 里的 `select(familyId,'')` 被成员检查拒绝，storage 留旧 id；
+`M-7` `reminder-list` / `notification-center` 在 `onLoad`+`onShow` 各拉一次，双份请求；
+`M-8` `usesCleartextTraffic: true` 写死且 BUILD.md 让运维保留，发行前应关掉；
+`M-9` 本地通知注册表只在动提醒时重建，冷启动不重建、逾期不补装；`M-10` H5 没有游客路由守卫，
+手输 `#/pages/home/index` 能进 tab 壳；`M-11` `http.ts` 用 `method as 'GET'` 绕过
+`@dcloudio/types` 没有 PATCH 的枚举（已作为真机风险记在 BUILD.md）。
+另有登录页双击提交会弹通用文案"操作失败，请稍后重试"——防抖的正常结果，提示语误导但不是缺陷。
+
+评审"放弃判断"的 5 条按现状定案：v1 保留归档入口（只加了实话文案与确认，`I-4` 缺位时它是
+唯一出口）；PATCH 风险按文档承担，不在后端加 POST 别名；`u-subsection` 留着不换 chips；
+游客 H5 深链不加守卫（H5 只是调试面）；`welcome` 的"继续注册"不做回访面板。
+`#ifdef APP-PLUS` 是否包含 `APP-HARMONY` 本地无法证实，BUILD.md 已把"鸿蒙没有 plus API"
+写成前提，出包时才可能暴露。
+
+
+
+### 踩过的坑，下次直接避开
+
+- **`apps/api` 的常驻服务是 `node apps/api/dist/main.js`，改 `src` 不会生效。**
+  验证后端行为前先 `pnpm --filter @moonbud/api build` 再重启，否则会拿旧二进制下结论。
+- **e2e 会 `TRUNCATE` 整个开发库**（`test/utils/db.ts`），浏览器验证用的账号随之消失；
+  跑完 e2e 要重新注册才能做前端验证。
+- `pnpm --filter @moonbud/api test`（非 e2e）匹配不到任何测试并以 1 退出——api 的测试
+  全在 `test/*.e2e-spec.ts`，别把它当回归门禁。
+- u-popup `mode="bottom"` 渲染的是 `.u-drawer-content.u-drawer-bottom`，底色来自
+  `--u-bg-white`；只测 documentElement 上的变量会得出错误结论，要看弹层自己的计算样式。
+

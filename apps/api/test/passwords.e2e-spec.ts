@@ -169,4 +169,82 @@ describe('密码', () => {
       .expect(200)
     expect(after.body.mustChangePassword).toBe(false)
   })
+
+  describe('找回请求要真的通知到能帮忙的人', () => {
+    /** 一个 OWNER、一个 ADMIN、一个 MEMBER，请求人是那个 MEMBER。 */
+    async function threeRoleFamily() {
+      const owner = await register({ username: 'rr_owner' }).expect(201)
+      const admin = await register({ username: 'rr_admin' }).expect(201)
+      const member = await register({ username: 'rr_member' }).expect(201)
+      const family = await request(app.getHttpServer())
+        .post('/api/families')
+        .set('Authorization', `Bearer ${owner.body.accessToken}`)
+        .send({ name: '奶奶家' })
+        .expect(201)
+      await prisma.familyMember.create({
+        data: { familyId: family.body.id, userId: admin.body.user.id, role: 'ADMIN' },
+      })
+      await prisma.familyMember.create({
+        data: { familyId: family.body.id, userId: member.body.user.id, role: 'MEMBER' },
+      })
+      return { owner, admin, member, familyId: family.body.id as string }
+    }
+
+    const requestReset = (username: string) =>
+      request(app.getHttpServer()).post('/api/auth/reset-request').send({ username })
+
+    it('给同家庭的 OWNER 与 ADMIN 各生成一条通知，普通成员收不到', async () => {
+      const { owner, admin, member, familyId } = await threeRoleFamily()
+
+      await requestReset('rr_member').expect(202)
+
+      const notifications = await prisma.notification.findMany({
+        where: { familyId },
+      })
+      expect(notifications.map((n) => n.userId).sort()).toEqual(
+        [owner.body.user.id, admin.body.user.id].sort(),
+      )
+      for (const notification of notifications) {
+        expect(notification.body).toContain('rr_member')
+        expect(notification.title).toContain('密码')
+      }
+      // 请求者本人不该收到——他登不进去，通知他也无法自助重置。
+      expect(notifications.some((n) => n.userId === member.body.user.id)).toBe(false)
+    })
+
+    it('账号不存在时一条通知都不生成', async () => {
+      await threeRoleFamily()
+
+      await requestReset('rr_ghost').expect(202)
+
+      expect(await prisma.notification.count()).toBe(0)
+    })
+
+    it('请求者自己就是唯一的 OWNER 时，没有别人可通知，但请求照样登记', async () => {
+      const solo = await register({ username: 'rr_solo' }).expect(201)
+      await request(app.getHttpServer())
+        .post('/api/families')
+        .set('Authorization', `Bearer ${solo.body.accessToken}`)
+        .send({ name: '一个人的家' })
+        .expect(201)
+
+      await requestReset('rr_solo').expect(202)
+
+      expect(await prisma.notification.count()).toBe(0)
+      expect(await prisma.passwordResetToken.count({ where: { userId: solo.body.user.id } })).toBe(
+        1,
+      )
+    })
+
+    it('连续点击提交只通知一次，不给管理员刷屏', async () => {
+      const { owner } = await threeRoleFamily()
+
+      await requestReset('RR_Member').expect(202)
+      await requestReset('rr_member').expect(202)
+
+      expect(
+        await prisma.notification.count({ where: { userId: owner.body.user.id } }),
+      ).toBe(1)
+    })
+  })
 })

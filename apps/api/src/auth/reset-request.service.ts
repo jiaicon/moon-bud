@@ -6,6 +6,9 @@ import { hashPassword } from './password.util'
 /** 恒定文案：它必须同时适用于"账号存在"与"账号不存在"。 */
 export const RESET_REQUEST_MESSAGE = '如果该账号存在，我们已记录你的请求，请联系家庭管理员重置密码'
 
+/** 同一个账号在这么短的时间内重复提交，不再重复惊动管理员。 */
+const NOTIFY_COOLDOWN_MS = 10 * 60 * 1000
+
 /**
  * 忘记密码的自助入口。v1 **不自动处理**：没有邮箱短信就没有凭据外的身份证明，
  * 唯一通路是同家庭的 ADMIN/OWNER 当面发一次性临时密码（spec 第 5 节）。
@@ -25,17 +28,77 @@ export class ResetRequestService {
     const tokenHash = await hashPassword(`reset-request:${username}`)
 
     if (user) {
-      await this.prisma.passwordResetToken.create({
-        data: {
+      const pending = await this.prisma.passwordResetToken.findFirst({
+        where: {
           userId: user.id,
-          tokenHash,
-          // 请求由用户自己发起，没有操作者；指向本人表示"自助登记"。
+          // 自助登记的请求把自己记成签发者，管理员的重置不会误命中这个条件。
           issuedBy: user.id,
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          usedAt: null,
+          createdAt: { gt: new Date(Date.now() - NOTIFY_COOLDOWN_MS) },
         },
+        select: { id: true },
       })
+      if (!pending) {
+        await this.prisma.passwordResetToken.create({
+          data: {
+            userId: user.id,
+            tokenHash,
+            // 请求由用户自己发起，没有操作者；指向本人表示"自助登记"。
+            issuedBy: user.id,
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          },
+        })
+        await this.notifyManagers(user.id, username)
+      }
     }
 
     return { message: RESET_REQUEST_MESSAGE }
+  }
+
+  /**
+   * 把请求送到能真正解决它的人面前：请求者所在家庭里其他 OWNER/ADMIN。
+   *
+   * 不含请求者本人——他正登不进去，通知他也自助不了；家庭全空（人都归档了）
+   * 或只剩他一个管理员时就是零通知，此时唯一出路仍是当面找人。
+   */
+  private async notifyManagers(userId: string, username: string): Promise<void> {
+    const memberships = await this.prisma.familyMember.findMany({
+      where: { userId },
+      select: { familyId: true, family: { select: { id: true, name: true, archivedAt: true } } },
+    })
+    const families = memberships.map((m) => m.family).filter((f) => f.archivedAt === null)
+    if (families.length === 0) return
+
+    const managers = await this.prisma.familyMember.findMany({
+      where: {
+        familyId: { in: families.map((f) => f.id) },
+        role: { in: ['OWNER', 'ADMIN'] },
+        userId: { not: userId },
+      },
+      select: { userId: true, familyId: true },
+    })
+
+    // 一个人可能同时管着请求者的好几个家庭：合并成一条，别刷屏。
+    const namesByManager = new Map<string, Set<string>>()
+    for (const manager of managers) {
+      const family = families.find((f) => f.id === manager.familyId)
+      if (!family) continue
+      const names = namesByManager.get(manager.userId) ?? new Set<string>()
+      names.add(family.name)
+      namesByManager.set(manager.userId, names)
+    }
+
+    for (const [managerId, names] of namesByManager) {
+      const family = families.find((f) => names.has(f.name))
+      await this.prisma.notification.create({
+        data: {
+          userId: managerId,
+          familyId: family?.id ?? '',
+          title: '有人需要重置密码',
+          body: `${username} 提交了找回密码请求（家庭：${[...names].join('、')}）。`
+            + '请在成员列表里为该账号设置临时密码。',
+        },
+      })
+    }
   }
 }

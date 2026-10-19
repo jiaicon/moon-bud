@@ -34,6 +34,8 @@ let refreshHandler: (() => Promise<string>) | null = null
 export function setAccessToken(token: string | null): void {
   accessToken = token
   uni.setStorageSync(ACCESS_TOKEN_KEY, token ?? '')
+  // 拿到新凭证就是新会话：下一次失效还要能再通知一次。
+  if (token) sessionExpiredReported = false
 }
 
 export function getAccessToken(): string | null {
@@ -44,6 +46,24 @@ export function getAccessToken(): string | null {
 
 export function setRefreshHandler(fn: () => Promise<string>): void {
   refreshHandler = fn
+}
+
+let sessionExpiredHandler: (() => void) | null = null
+let sessionExpiredReported = false
+
+/**
+ * 会话彻底救不回来时的出口。http 层只负责"说一次"，怎么把人带回登录由 store 决定：
+ * 各页自己处理 401 的话，漏一个页面就是一个甩出 "Unauthorized" 的界面。
+ */
+export function setSessionExpiredHandler(fn: (() => void) | null): void {
+  sessionExpiredHandler = fn
+  sessionExpiredReported = false
+}
+
+function reportSessionExpired(): void {
+  if (!sessionExpiredHandler || sessionExpiredReported) return
+  sessionExpiredReported = true
+  sessionExpiredHandler()
 }
 
 let refreshing: Promise<string> | null = null
@@ -80,7 +100,8 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
         url,
         // @dcloudio/types 的 method 联合里没有 'PATCH'，但 uni-h5 运行时是支持的
         // （其源码里存在 'PATCH' 字面量），后端的更新类接口又确实是 PATCH。
-        method: method as 'GET',
+        // .cast 到那个联合本身，别谎报成 'GET'：写错方法名时类型还能拦一下。
+        method: method as UniNamespace.RequestOptions['method'],
         data: options.data as never,
         timeout: options.timeoutMs ?? 15000,
         header: needsAuth && token ? { Authorization: `Bearer ${token}` } : {},
@@ -106,12 +127,15 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       const fresh = await renewAccessToken()
       const retry = await send(fresh)
       if (retry.statusCode >= 200 && retry.statusCode < 300) return retry.data as T
+      if (retry.statusCode === 401) reportSessionExpired()
       throw normalizeError(retry)
     } catch (err) {
       if (err instanceof ApiRequestError) throw err
+      reportSessionExpired()
       throw normalizeError(err)
     }
   }
 
+  if (needsAuth && res.statusCode === 401) reportSessionExpired()
   throw normalizeError(res)
 }

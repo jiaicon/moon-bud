@@ -1,10 +1,18 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import ThemeSwitcher from '../../components/ThemeSwitcher.vue'
 import { hasPreviewVisited } from '../../utils/preview-visited'
 
 const registerLabel = ref('开始使用')
+const expired = ref(false)
+
+// 会话过期被踢回来时得说清楚为什么，并且给一条回去的路：
+// 欢迎页原本只有"注册/加入"，重新登录的人在这里找不到门。
+onLoad((query) => {
+  expired.value = String(query?.expired ?? '') === '1'
+})
 
 // 游客看过预览却没注册就离开，下次启动应当被引导回"完成注册"，而不是从头再挑一遍配色。
 if (hasPreviewVisited()) {
@@ -20,6 +28,7 @@ const go = (url: string) => uni.navigateTo({ url })
       <view class="welcome__hero">
         <text class="welcome__name">月芽</text>
         <text class="welcome__slogan">一家人一起记，孩子的一天看得见</text>
+        <text v-if="expired" class="welcome__notice">登录已过期，重新登录就能接着记。</text>
       </view>
 
       <view class="welcome__values">
@@ -38,8 +47,11 @@ const go = (url: string) => uni.navigateTo({ url })
       </view>
 
       <view class="welcome__actions">
-        <view class="btn btn--primary" @click="go('/pages/preview/index')">
-          <text class="btn__label btn__label--inverse">看看它能做什么</text>
+        <view v-if="expired" class="btn btn--primary" @click="go('/pages/login/index')">
+          <text class="btn__label btn__label--inverse">重新登录</text>
+        </view>
+        <view class="btn" :class="expired ? 'btn--ghost' : 'btn--primary'" @click="go('/pages/preview/index')">
+          <text class="btn__label" :class="{ 'btn__label--inverse': !expired }">看看它能做什么</text>
         </view>
         <view class="btn btn--ghost" @click="go('/pages/login/index?mode=join')">
           <text class="btn__label">我收到了邀请码</text>
@@ -81,6 +93,13 @@ const go = (url: string) => uni.navigateTo({ url })
   font-size: 28rpx;
   line-height: 1.6;
   color: var(--mb-color-text-secondary);
+}
+
+.welcome__notice {
+  margin-top: 8rpx;
+  font-size: 26rpx;
+  line-height: 1.6;
+  color: var(--mb-color-error);
 }
 
 .welcome__values {

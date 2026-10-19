@@ -58,6 +58,22 @@ describe('normalizeError', () => {
     expect(normalizeError(undefined).message).toBeTruthy()
     expect(normalizeError({}).message).toBeTruthy()
   })
+
+  // 退出登录后按浏览器"后退"，tab 页会把 Nest 守卫的默认英文直接印在界面上。
+  it('401/403 的默认英文文案不许出现在界面上', () => {
+    const unauthorized = normalizeError({ statusCode: 401, data: { statusCode: 401, message: 'Unauthorized' } })
+    expect(unauthorized.message).toContain('登录')
+    expect(unauthorized.message).not.toContain('Unauthorized')
+
+    const forbidden = normalizeError({ statusCode: 403, data: { statusCode: 403, message: 'Forbidden' } })
+    expect(forbidden.message).not.toContain('Forbidden')
+    expect(forbidden.message).toMatch(/权限|登录/)
+  })
+
+  it('后端写明了理由时保留原文，通用文案不许盖掉它', () => {
+    const e = normalizeError({ statusCode: 403, data: { statusCode: 403, message: '只有管理员能改家庭名称', error: 'Forbidden' } })
+    expect(e.message).toBe('只有管理员能改家庭名称')
+  })
 })
 
 describe('access token', () => {
@@ -181,6 +197,80 @@ describe('续期的 single-flight', () => {
     const { renewAccessToken } = await import('../http')
     await expect(renewAccessToken()).rejects.toThrow(/登录凭证/)
     vi.resetModules()
+  })
+})
+
+describe('会话失效的出口', () => {
+  const uniAny = globalThis as unknown as { uni: Record<string, unknown> }
+  const originalRequest = uniAny.uni.request
+
+  const always = (statusCode: number) =>
+    vi.fn((opts: { success: (res: { statusCode: number; data: unknown }) => void }) =>
+      opts.success({ statusCode, data: { statusCode, message: 'Unauthorized' } }),
+    )
+
+  afterEach(() => {
+    uniAny.uni.request = originalRequest
+    vi.resetModules()
+  })
+
+  it('续期也救不回来时通知一次，让 App 把人带回登录', async () => {
+    vi.resetModules()
+    const { apiRequest, setAccessToken, setRefreshHandler, setSessionExpiredHandler } = await import('../http')
+    const onExpired = vi.fn()
+    setSessionExpiredHandler(onExpired)
+    setAccessToken('at')
+    setRefreshHandler(async () => {
+      throw new Error('本地没有登录凭证')
+    })
+    uniAny.uni.request = always(401)
+
+    await expect(apiRequest('/me')).rejects.toThrow(/登录/)
+    expect(onExpired).toHaveBeenCalledTimes(1)
+  })
+
+  it('续期成功但重放仍然 401，同样算会话失效', async () => {
+    vi.resetModules()
+    const { apiRequest, setAccessToken, setRefreshHandler, setSessionExpiredHandler } = await import('../http')
+    const onExpired = vi.fn()
+    setSessionExpiredHandler(onExpired)
+    setAccessToken('at')
+    setRefreshHandler(async () => 'fresh-at')
+    uniAny.uni.request = always(401)
+
+    await expect(apiRequest('/me')).rejects.toThrow(/登录/)
+    expect(onExpired).toHaveBeenCalledTimes(1)
+  })
+
+  it('并发失败只通知一次；重新拿到会话后才会再通知', async () => {
+    vi.resetModules()
+    const { apiRequest, setAccessToken, setRefreshHandler, setSessionExpiredHandler } = await import('../http')
+    const onExpired = vi.fn()
+    setSessionExpiredHandler(onExpired)
+    setAccessToken('at')
+    setRefreshHandler(async () => {
+      throw new Error('本地没有登录凭证')
+    })
+    uniAny.uni.request = always(401)
+
+    await Promise.allSettled([apiRequest('/me'), apiRequest('/families'), apiRequest('/events')])
+    expect(onExpired).toHaveBeenCalledTimes(1)
+
+    setAccessToken('new-at')
+    await apiRequest('/me').catch(() => undefined)
+    expect(onExpired).toHaveBeenCalledTimes(2)
+  })
+
+  it('公开端点的 401 不算会话失效：密码错误不该把人踢回欢迎页', async () => {
+    vi.resetModules()
+    const { apiRequest, setRefreshHandler, setSessionExpiredHandler } = await import('../http')
+    const onExpired = vi.fn()
+    setSessionExpiredHandler(onExpired)
+    setRefreshHandler(async () => 'fresh-at')
+    uniAny.uni.request = always(401)
+
+    await expect(apiRequest('/auth/login', { method: 'POST', auth: false })).rejects.toThrow(/登录/)
+    expect(onExpired).not.toHaveBeenCalled()
   })
 })
 

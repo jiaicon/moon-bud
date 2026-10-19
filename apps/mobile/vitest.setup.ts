@@ -10,6 +10,7 @@ const storage = new Map<string, unknown>()
   setNavigationBarColor: () => {},
   setTabBarStyle: () => {},
   showToast: () => {},
+  reLaunch: () => {},
   request: () => {
     throw new Error('uni.request is not available in unit tests')
   },

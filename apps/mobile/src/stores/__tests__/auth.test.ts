@@ -2,11 +2,12 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../api/endpoints', () => ({
-  authApi: { register: vi.fn(), login: vi.fn(), refresh: vi.fn(), changePassword: vi.fn() },
+  authApi: { register: vi.fn(), login: vi.fn(), refresh: vi.fn(), changePassword: vi.fn(), logout: vi.fn() },
   meApi: { get: vi.fn() },
 }))
 
 import { authApi, meApi } from '../../api/endpoints'
+import { apiRequest, setAccessToken } from '../../api/http'
 import { useAuthStore } from '../auth'
 
 const at = 'at'
@@ -82,6 +83,22 @@ describe('auth store', () => {
     expect(store.mustChangePassword).toBe(true)
   })
 
+  it('bootstrap 在飞时后来者并入同一次：页面等会话不该把冷启动的 /me 翻倍', async () => {
+    uni.setStorageSync('refreshToken', rt)
+    ;(authApi.refresh as ReturnType<typeof vi.fn>).mockResolvedValue({ accessToken: at, refreshToken: rt })
+    ;(meApi.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      user: loginResult.user,
+      families: [],
+      mustChangePassword: false,
+    })
+    const store = useAuthStore()
+
+    await Promise.all([store.bootstrap(), store.bootstrap()])
+
+    expect(meApi.get).toHaveBeenCalledTimes(1)
+    expect(store.isLoggedIn).toBe(true)
+  })
+
   it('bootstrap 失败时若 refresh token 已被别的续期换掉，就不清会话', async () => {
     uni.setStorageSync('refreshToken', 'rt-old')
     ;(authApi.refresh as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -104,5 +121,59 @@ describe('auth store', () => {
     await store.bootstrap()
     expect(store.token).toBeNull()
     expect(uni.getStorageSync('refreshToken')).toBe('')
+  })
+
+  it('会话失效时清掉本地会话并带回欢迎页', () => {
+    const reLaunched: string[] = []
+    ;(uni as unknown as { reLaunch: (o: { url: string }) => void }).reLaunch = (o) => reLaunched.push(o.url)
+    const store = useAuthStore()
+    store.token = at
+    store.user = loginResult.user
+
+    store.handleSessionExpired()
+
+    expect(store.token).toBeNull()
+    expect(store.user).toBeNull()
+    expect(reLaunched).toEqual(['/pages/welcome/index?expired=1'])
+  })
+
+  it('主动退出后，在飞的请求失败不该再报"登录已过期"', async () => {
+    const reLaunched: string[] = []
+    ;(uni as unknown as { reLaunch: (o: { url: string }) => void }).reLaunch = (o) => reLaunched.push(o.url)
+    const store = useAuthStore()
+    store.ensureRefreshHandler()
+    ;(authApi.login as ReturnType<typeof vi.fn>).mockResolvedValue(loginResult)
+    await store.login('mama2024', 'pass12345')
+    store.token = null
+
+    await store.logout()
+
+    const uniAny = globalThis as unknown as { uni: Record<string, unknown> }
+    const original = uniAny.uni.request
+    uniAny.uni.request = (opts: { success: (res: unknown) => void }) =>
+      opts.success({ statusCode: 401, data: { statusCode: 401, message: 'Unauthorized' } })
+    await expect(apiRequest('/me')).rejects.toThrow(/登录/)
+    uniAny.uni.request = original
+
+    expect(reLaunched).toEqual([])
+  })
+
+  it('装配之后，带鉴权的请求 401 且续期救不回来就自动回到欢迎页', async () => {
+    const reLaunched: string[] = []
+    ;(uni as unknown as { reLaunch: (o: { url: string }) => void }).reLaunch = (o) => reLaunched.push(o.url)
+    uni.setStorageSync('refreshToken', '')
+    const store = useAuthStore()
+    store.ensureRefreshHandler()
+    setAccessToken('stale-at')
+
+    const uniAny = globalThis as unknown as { uni: Record<string, unknown> }
+    const original = uniAny.uni.request
+    uniAny.uni.request = (opts: { success: (res: unknown) => void }) =>
+      opts.success({ statusCode: 401, data: { statusCode: 401, message: 'Unauthorized' } })
+    await expect(apiRequest('/me')).rejects.toThrow(/登录/)
+    uniAny.uni.request = original
+    setAccessToken(null)
+
+    expect(reLaunched).toEqual(['/pages/welcome/index?expired=1'])
   })
 })

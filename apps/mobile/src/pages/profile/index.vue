@@ -16,6 +16,9 @@ const user = computed(() => authStore.user)
 const familyName = computed(() => familyStore.currentFamily?.name ?? '还没有家庭')
 
 async function refreshUnread(): Promise<void> {
+  // 冷启动时 access token 还在路上（isLoggedIn 只是内存态）。不等会话落定就
+  // 走下面的守卫，这一页会把家庭名一直说成"还没有家庭"，说到你离开本页。
+  if (authStore.status === 'loading') await authStore.bootstrap()
   if (!authStore.isLoggedIn) return
   unread.value = await fetchUnreadCount()
   await familyStore.load()

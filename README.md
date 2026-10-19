@@ -115,6 +115,29 @@ pnpm test:shared        # 共享契约单测
 
 ---
 
+## 移动端（`apps/mobile`）
+
+uni-app（Vue3 标准版）+ uView Pro + Pinia，一套代码覆盖 H5 / 小程序 / App（Android、iOS、鸿蒙）。
+
+```
+pnpm --filter @moonbud/mobile dev:h5      # 浏览器预览，http://localhost:5173
+pnpm --filter @moonbud/mobile test        # 逻辑单测（vitest，不需要后端）
+pnpm --filter @moonbud/mobile type-check  # vue-tsc 全量类型检查
+pnpm --filter @moonbud/mobile build:h5    # 生产构建，产物在 dist/build/h5
+```
+
+`apps/mobile/.env.development` / `.env.production` 已随仓库提交（里面没有密钥），改地址就是改这两个文件。
+
+三个必须知道的点：
+
+- **后端地址只能来自 `VITE_API_BASE_URL`**，缺配置会在启动时直接抛错而不是回退到 localhost —— 回退在真机上表现为"莫名连不上"。浏览器里 `127.0.0.1:3000/api` 够用，**真机必须换成开发机的局域网 IP**（详见 [`apps/mobile/BUILD.md`](apps/mobile/BUILD.md) 第 1 节）。
+- **APK 出不了命令行。** `build:app` 只产出打包资源，签名 APK 必须由 HBuilderX 走云打包；因此本仓库的全部验证止于浏览器，真机行为（本地通知、扫码、明文 HTTP）要等你按 BUILD.md 出包后才算验证过。
+- **验收标准定在 Android。** iOS 需要开发者账号，鸿蒙需要 DevEco Studio 且不支持 `plus` API（本地通知在鸿蒙上直接不可用，提醒只走站内提醒中心）—— 两者都是兼容性目标，不是验收目标。
+
+页面清单、主题系统（4 套预设 + 明/暗/自动，全部走语义 CSS 变量，禁止字面色值）、游客只读预览等行为，见 `docs/superpowers/specs/2026-10-16-moonbud-design.md` 第 7、9 节。
+
+---
+
 ## 已知环境差异（都是实测结论，不是猜测）
 
 - **宿主 Postgres 端口是 5433，不是 5432。** 这台机器上已有本地 `postgresql-x64-18` 服务占用 5432；容器若也发布到 5432，宿主的连接会被**本地实例**接走，报出 `role "moonbud" does not exist` —— 一个完全指不到真实原因的错误。容器内始终是 5432，compose 里的 `api` 服务用服务名 `postgres:5432`。

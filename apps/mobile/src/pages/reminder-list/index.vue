@@ -14,7 +14,7 @@ const FILTERS: ReminderListFilter[] = ['ACTIVE', 'OVERDUE', 'DONE']
 const EMPTY_HINTS = [
   '睡前的维生素、明天的体检，都可以让它替你记住。',
   '该做的都按时做完了。',
-  '点一下"完成本次"，提醒就会归档到这里。',
+  '一次性提醒完成后归档到这里；重复提醒只完当天那一次，不会离开待办。',
 ]
 
 const familyStore = useFamilyStore()

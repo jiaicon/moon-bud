@@ -45,6 +45,20 @@ const familyId = computed(() => familyStore.currentFamilyId ?? '')
 const children = computed(() => childStore.childrenByFamily[familyId.value] ?? [])
 const timezone = computed(() => authStore.user?.timezone ?? 'Asia/Shanghai')
 const preset = computed(() => RRULE_PRESETS.find((p) => p.key === presetKey.value) ?? RRULE_PRESETS[0])
+const isEdit = computed(() => reminderId.value !== '')
+
+/**
+ * 类型在建好之后就不能再改了：后端的 UpdateReminderDto 刻意不收 `type`，而
+ * ValidationPipe 是 whitelist 不 forbid —— 发过去的 `type` 会被静默丢掉。
+ * 让开关照拨不误，用户看到"已保存"却什么都没变，所以在这里当场说清楚。
+ */
+function pickType(recurring: boolean): void {
+  if (isEdit.value && recurring !== isRecurring.value) {
+    uni.showToast({ title: '提醒类型改不了：请停掉这个提醒，再按新类型建一个', icon: 'none' })
+    return
+  }
+  isRecurring.value = recurring
+}
 
 function fmt(d: Date, kind: 'date' | 'time'): string {
   const p = (n: number) => String(n).padStart(2, '0')
@@ -102,17 +116,23 @@ async function onSubmit(): Promise<void> {
   if (!validate()) return
   saving.value = true
   try {
-    const payload = isRecurring.value
-      ? { title: title.value.trim(), type: 'RECURRING' as const, rrule: currentRrule(), timezone: timezone.value }
-      : { title: title.value.trim(), type: 'ONE_TIME' as const, dueAt: localIso(date.value, time.value) }
+    const schedule = isRecurring.value
+      ? { rrule: currentRrule(), timezone: timezone.value }
+      : { dueAt: localIso(date.value, time.value) }
     const shared = {
       childId: childId.value || null,
       assigneeId: assigneeId.value || null,
       note: note.value.trim() || null,
     }
+    const base = { title: title.value.trim(), ...schedule, ...shared }
+    // 只有 POST 收 type：PATCH 发过去会被 whitelist 静默丢掉（见 pickType 的注释），
+    // 写在这里只会让人以为改得动。
     const saved = reminderId.value
-      ? await remindersApi.update(familyId.value, reminderId.value, { ...payload, ...shared })
-      : await remindersApi.create(familyId.value, { ...payload, ...shared })
+      ? await remindersApi.update(familyId.value, reminderId.value, base)
+      : await remindersApi.create(familyId.value, {
+          ...base,
+          type: isRecurring.value ? 'RECURRING' : 'ONE_TIME',
+        })
 
     // 本地排期只在 APP 端真实存在；其它平台里这个调用会显式警告，不弹窗打扰。
     const next = computeDueAt({
@@ -234,13 +254,14 @@ const goBack = () => uni.navigateBack()
       <view class="field">
         <text class="field__label">类型</text>
         <view class="field__row">
-          <view class="chip" :class="{ 'chip--active': !isRecurring }" @click="isRecurring = false">
+          <view class="chip" :class="{ 'chip--active': !isRecurring }" @click="pickType(false)">
             <text class="chip__label">一次性</text>
           </view>
-          <view class="chip" :class="{ 'chip--active': isRecurring }" @click="isRecurring = true">
+          <view class="chip" :class="{ 'chip--active': isRecurring }" @click="pickType(true)">
             <text class="chip__label">重复</text>
           </view>
         </view>
+        <text v-if="isEdit" class="field__hint">类型建好之后就不能改了。想换成另一种，请停掉这个提醒再建一个。</text>
       </view>
 
       <view v-if="!isRecurring" class="field">

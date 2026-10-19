@@ -40,19 +40,26 @@ describe('编辑时把记录填回表单', () => {
   })
 
   it('payload 的数值转成字符串（输入框只吃字符串）', () => {
-    const state = eventToFormState(event)
+    const state = eventToFormState(event, 'Asia/Shanghai')
     expect(state.values.amountMl).toBe('120')
   })
 
-  it(' occurredAt 拆成本地的日期与时刻，不是打开页面的现在', () => {
-    const state = eventToFormState(event)
-    const d = new Date(event.occurredAt)
-    expect(state.date).toBe(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)
-    expect(state.time).toBe(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`)
+  it('occurredAt 按账号时区拆成日期与时刻，不是打开页面的现在', () => {
+    // 01:30Z 在上海是当天 09:30。断言写死，测试就不再跟着跑测试的机器走。
+    const state = eventToFormState(event, 'Asia/Shanghai')
+    expect(state.date).toBe('2026-10-19')
+    expect(state.time).toBe('09:30')
+  })
+
+  it('换一个个人的时区，读回来的钟点也跟着换', () => {
+    // 同一个时刻在纽约（此时还是夏令时 UTC-4）是前一天晚上 21:30。
+    const state = eventToFormState(event, 'America/New_York')
+    expect(state.date).toBe('2026-10-18')
+    expect(state.time).toBe('21:30')
   })
 
   it('没有备注就是空串，不写出 "null"', () => {
-    const state = eventToFormState({ ...event, note: null } as EventDto)
+    const state = eventToFormState({ ...event, note: null } as EventDto, 'Asia/Shanghai')
     expect(state.note).toBe('')
   })
 
@@ -63,14 +70,13 @@ describe('编辑时把记录填回表单', () => {
       endedAt: '2026-10-19T03:15:00.000Z',
       payload: {},
     } as unknown as EventDto
-    const state = eventToFormState(sleep)
-    const end = new Date(sleep.endedAt as string)
-    expect(state.endTime).toBe(`${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`)
-    expect(state.endDate.length).toBe(10)
+    const state = eventToFormState(sleep, 'Asia/Shanghai')
+    expect(state.endTime).toBe('11:15')
+    expect(state.endDate).toBe('2026-10-19')
   })
 
   it('没有 endedAt 时结束时间是空的', () => {
-    expect(eventToFormState(event).endDate).toBe('')
+    expect(eventToFormState(event, 'Asia/Shanghai').endDate).toBe('')
   })
 
   it('交接是一次性的：取过一次就没了', () => {

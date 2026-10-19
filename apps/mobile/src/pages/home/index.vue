@@ -25,6 +25,12 @@ const overviewFailed = ref(false)
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
 const child = computed(() => childStore.currentChild(familyId.value))
 const timezone = computed(() => authStore.user?.timezone ?? 'Asia/Shanghai')
+// 这个家庭的名单是不是已经读到过。没读到过 != 没有孩子。
+const childrenLoaded = computed(() => familyId.value in childStore.childrenByFamily)
+// 只在这次请求真的失败了才算失败：error 是全局的，别把上一次/别人的家庭的错误算进来。
+const childrenLoadFailed = computed(() => !childrenLoaded.value && !childStore.loading && childStore.error !== null)
+
+let refreshSeq = 0
 
 async function refresh(): Promise<void> {
   if (!familyId.value || !child.value) {
@@ -32,6 +38,9 @@ async function refresh(): Promise<void> {
     overviewFailed.value = false
     return
   }
+  // 切孩子和上一次请求是并发的：序号不是最新的那一次不许落数据，
+  // 否则当前孩子名下会显示上一个孩子的记录。
+  const seq = ++refreshSeq
   loading.value = true
   try {
     // 概览只要"最近"的少量记录：拉 30 条足够算出今天换了几次尿布。
@@ -39,6 +48,7 @@ async function refresh(): Promise<void> {
       eventsApi.list(familyId.value, { childId: child.value.id, pageSize: 30 }),
       remindersApi.list(familyId.value, 'ACTIVE', { pageSize: 20 }),
     ])
+    if (seq !== refreshSeq) return
     summary.value = buildTodaySummary({
       events: events.items as EventDto[],
       reminders: reminders.items as ReminderDto[],
@@ -46,11 +56,12 @@ async function refresh(): Promise<void> {
     })
     overviewFailed.value = false
   } catch {
-    // 失败要说"失败了"：summary 置空只用于算不出内容，界面另用 overviewFailed 分辨。
+    // 失败也要说"失败了"：summary 置空只用于算不出内容，界面另用 overviewFailed 分辨。
+    if (seq !== refreshSeq) return
     summary.value = null
     overviewFailed.value = true
   } finally {
-    loading.value = false
+    if (seq === refreshSeq) loading.value = false
   }
 }
 
@@ -107,6 +118,8 @@ const view = computed(() =>
     familyLoadFailed: familyLoadFailed.value,
     familyId: familyId.value,
     hasChild: !!child.value,
+    childrenLoaded: childrenLoaded.value,
+    childrenLoadFailed: childrenLoadFailed.value,
   }),
 )
 const rows = computed(() => buildOverviewRows(summary.value, overviewFailed.value))
@@ -131,6 +144,17 @@ const overdueCount = computed(() => summary.value?.overdueReminders.length ?? 0)
         <text class="home__empty-title">还没有家庭</text>
         <text class="home__hint">创建一个家庭，或凭邀请码加入家人的家庭。</text>
         <view class="btn" @click="goFamilySelect"><text class="btn__label">去创建或加入</text></view>
+      </view>
+
+      <view v-else-if="view === 'loading'" class="home__empty">
+        <text class="home__empty-title">正在读取孩子名单</text>
+        <text class="home__hint">记录、提醒都按孩子来看，稍一下下。</text>
+      </view>
+
+      <view v-else-if="view === 'child-retry'" class="home__empty">
+        <text class="home__empty-title">孩子名单没加载出来</text>
+        <text class="home__hint">{{ childStore.error ?? '网络或后端暂时不可用，重试一下即可。' }}</text>
+        <view class="btn" @click="retry"><text class="btn__label">重试</text></view>
       </view>
 
       <view v-else-if="view === 'add-child'" class="home__empty">

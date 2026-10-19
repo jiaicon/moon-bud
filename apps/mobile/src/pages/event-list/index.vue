@@ -38,6 +38,12 @@ const typeOptions = computed<{ value: EventType | ''; label: string }[]>(() => [
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
 const children = computed(() => childStore.childrenByFamily[familyId.value] ?? [])
 const childId = computed(() => childStore.currentChild(familyId.value)?.id ?? '')
+// 这个家庭的名单是不是已经读到过。没读到过 != 没有孩子。
+const childrenLoaded = computed(() => familyId.value in childStore.childrenByFamily)
+// 只在这次请求真的失败了才算失败：error 是全局的，别把上一次或别的家庭的错误算进来。
+const childrenLoadFailed = computed(
+  () => !childrenLoaded.value && !childStore.loading && childStore.error !== null,
+)
 const hasMore = computed(() => events.value.length < total.value)
 
 /** 按天分组：家长回忆"那天下午"，不是"14:32 那条"。 */
@@ -185,6 +191,12 @@ const goForm = () => uni.navigateTo({ url: '/pages/event-form/index' })
 const goFamily = () => uni.navigateTo({ url: '/pages/family-select/index' })
 const goChild = () => uni.navigateTo({ url: '/pages/child-form/index' })
 
+// 名单读失败时"正在读取"会一直挂着，得给一条出路。
+async function retryChildren(): Promise<void> {
+  if (!familyId.value) return
+  if (await childStore.load(familyId.value)) await load(true)
+}
+
 const myRole = computed(() => familyStore.currentFamily?.role ?? null)
 
 function editEvent(event: EventDto): void {
@@ -229,6 +241,15 @@ async function removeEvent(event: EventDto): Promise<void> {
         hint="创建一个家庭，全家才能共用同一份记录。"
         action-label="去创建家庭"
         @action="goFamily"
+      />
+
+      <empty-state
+        v-else-if="!childrenLoaded"
+        icon="👶"
+        :title="childrenLoadFailed ? '孩子名单没加载出来' : '正在读取孩子名单'"
+        :hint="childrenLoadFailed ? (childStore.error ?? '网络或后端暂时不可用，重试一下即可。') : '记录要按孩子来看，稍一下下。'"
+        :action-label="childrenLoadFailed ? '重试' : undefined"
+        @action="retryChildren"
       />
 
       <empty-state

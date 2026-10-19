@@ -15,11 +15,21 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const unreadOnly = ref(true)
 
-const unreadCount = computed(() => items.value.filter((n) => !n.readAt).length)
 const hasMore = computed(() => items.value.length < total.value)
 
-async function load(reset: boolean): Promise<void> {
-  if (loading.value) return
+/**
+ * 切筛选、下拉、回到本页都可能并发。被"正在加载"挡掉的那一次会让分段标签
+ * 和列表内容不是同一个条件，所以排队串行，后一次一定真跑。
+ */
+let queue: Promise<void> = Promise.resolve()
+
+function load(reset: boolean): Promise<void> {
+  const next = queue.then(() => run(reset))
+  queue = next.catch(() => undefined)
+  return next
+}
+
+async function run(reset: boolean): Promise<void> {
   loading.value = true
   error.value = null
   const next = reset ? 1 : page.value + 1
@@ -65,7 +75,11 @@ async function readAll(): Promise<void> {
     uni.showToast({ title: `已读 ${res.updated} 条`, icon: 'none' })
   } catch (err) {
     uni.showToast({ title: err instanceof Error ? err.message : '操作失败', icon: 'none' })
+    return
   }
+  // 头顶的"N 条未读"读的是服务端的 total：不重取，它会停在旧数字上，
+  // 而列表里的红点已经全灭了。
+  await load(true)
 }
 
 function toggleFilter(): void {

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { computeDueAt, expandDueDates, isSupportedTimezone } from '../reminder-recurrence'
+import {
+  computeDueAt,
+  expandDueDates,
+  instantFromWallClock,
+  isSupportedTimezone,
+  wallClockAt,
+} from '../reminder-recurrence'
 
 const TZ = 'Asia/Shanghai' // UTC+8，无夏令时，便于断言
 
@@ -166,6 +172,74 @@ describe('expandDueDates', () => {
         to: new Date('2026-10-18T00:00:00Z'),
       }),
     ).toEqual([])
+  })
+})
+
+describe('instantFromWallClock / wallClockAt', () => {
+  it('上海墙上的 08:00 是 UTC 的 00:00', () => {
+    const at = instantFromWallClock('Asia/Shanghai', {
+      year: 2026,
+      month: 11,
+      day: 1,
+      hour: 8,
+      minute: 0,
+    })
+    expect(at?.toISOString()).toBe('2026-11-01T00:00:00.000Z')
+  })
+
+  it('同一份钟点在别的时区是另一个时刻', () => {
+    const clock = { year: 2026, month: 12, day: 15, hour: 8, minute: 0 }
+    const sh = instantFromWallClock('Asia/Shanghai', clock)
+    const ny = instantFromWallClock('America/New_York', clock)
+    expect(sh?.toISOString()).toBe('2026-12-15T00:00:00.000Z')
+    expect(ny?.toISOString()).toBe('2026-12-15T13:00:00.000Z')
+  })
+
+  it('墙上的 0 点不会漂到前一天', () => {
+    const at = instantFromWallClock('Asia/Shanghai', {
+      year: 2026,
+      month: 11,
+      day: 1,
+      hour: 0,
+      minute: 0,
+    })
+    expect(at?.toISOString()).toBe('2026-10-31T16:00:00.000Z')
+  })
+
+  it('夏令时切换日按当天真实偏移换算', () => {
+    // 纽约 2026-03-08 02:30 并不存在（02:00 直接跳到 03:00）：
+    // 换算不能抛错，也不能给出一个偏移完全错的时刻。
+    const before = instantFromWallClock('America/New_York', {
+      year: 2026,
+      month: 3,
+      day: 7,
+      hour: 8,
+      minute: 0,
+    })
+    const after = instantFromWallClock('America/New_York', {
+      year: 2026,
+      month: 3,
+      day: 9,
+      hour: 8,
+      minute: 0,
+    })
+    expect(before?.toISOString()).toBe('2026-03-07T13:00:00.000Z')
+    expect(after?.toISOString()).toBe('2026-03-09T12:00:00.000Z')
+  })
+
+  it('非法时区返回 null 而不抛错', () => {
+    expect(
+      instantFromWallClock('Not/AZone', { year: 2026, month: 1, day: 1, hour: 0, minute: 0 }),
+    ).toBeNull()
+  })
+
+  it('和 wallClockAt 互为逆运算', () => {
+    const clock = wallClockAt('Asia/Shanghai', new Date('2026-11-01T00:00:00Z'))
+    expect(clock).toEqual({ year: 2026, month: 11, day: 1, hour: 8, minute: 0 })
+    expect(instantFromWallClock('Asia/Shanghai', clock!)?.toISOString()).toBe(
+      '2026-11-01T00:00:00.000Z',
+    )
+    expect(wallClockAt('Not/AZone', new Date())).toBeNull()
   })
 })
 

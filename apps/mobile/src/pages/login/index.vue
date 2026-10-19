@@ -10,7 +10,7 @@ import { useLoginForm, type LoginMode } from './use-login-form'
 
 const authStore = useAuthStore()
 const familyStore = useFamilyStore()
-const { mode, form, errors, loading, submit } = useLoginForm()
+const { mode, form, errors, loading, usedExistingAccount, submit } = useLoginForm()
 
 const MODES: { value: LoginMode; label: string }[] = [
   { value: 'login', label: '登录' },
@@ -22,6 +22,12 @@ const isRegister = computed(() => mode.value !== 'login')
 const title = computed(
   () => ({ login: '欢迎回来', register: '开始记录', join: '加入家人的家庭' })[mode.value],
 )
+const hint = computed(() => {
+  if (mode.value === 'join') return '已有账号就直接登录，没有的话一屏填完顺手注册一个。'
+  return isRegister.value
+    ? '账号、密码、称呼一屏填完，三步以内就能开始记录。'
+    : '用家庭里任意一个账号登录即可。'
+})
 
 const toast = (title: string) => uni.showToast({ title, icon: 'none' })
 
@@ -55,10 +61,12 @@ async function onSubmit() {
     return
   }
   if (mode.value === 'join') {
-    toast('已加入家庭')
+    toast(usedExistingAccount.value ? '已用现有账号登录并加入家庭' : '已加入家庭')
     uni.switchTab({ url: '/pages/home/index' })
     return
   }
+  // 注册模式撞了账号也走登录：不说一声，人会以为账号是自己刚建的。
+  if (usedExistingAccount.value) toast('该账号已存在，已直接为你登录')
   // 管理员重置过密码的人必须先改掉临时密码，否则下次还是用它登录。
   if (authStore.mustChangePassword) {
     uni.navigateTo({ url: '/pages/change-password/index?forced=1' })
@@ -89,9 +97,7 @@ async function onSubmit() {
       </view>
 
       <text class="login__title">{{ title }}</text>
-      <text class="login__hint">
-        {{ isRegister ? '账号、密码、称呼一屏填完，三步以内就能开始记录。' : '用家庭里任意一个账号登录即可。' }}
-      </text>
+      <text class="login__hint">{{ hint }}</text>
 
       <view class="login__fields">
         <view class="field">
@@ -134,7 +140,7 @@ async function onSubmit() {
         @click="onSubmit"
       >
         <text class="btn__label">
-          {{ mode === 'login' ? '登录' : mode === 'register' ? '注册并开始' : '注册并加入家庭' }}
+          {{ mode === 'login' ? '登录' : mode === 'register' ? '注册并开始' : '加入家庭' }}
         </text>
       </view>
 

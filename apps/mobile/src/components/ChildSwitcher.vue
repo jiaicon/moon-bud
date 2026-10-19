@@ -12,6 +12,11 @@ const open = ref(false)
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
 const children = computed(() => childStore.childrenByFamily[familyId.value] ?? [])
 const current = computed(() => childStore.currentChild(familyId.value))
+// 名单还没读到过的时候不能写"未添加"：那是"这个家庭没有孩子"的意思。
+const loaded = computed(() => familyId.value in childStore.childrenByFamily)
+const display = computed(
+  () => current.value?.name ?? (familyId.value && !loaded.value ? '读取中' : '未添加'),
+)
 
 function pick(childId: string): void {
   open.value = false
@@ -30,7 +35,7 @@ const goAdd = () => {
   <view class="switcher">
     <view class="switcher__trigger" @click="open = true">
       <text class="switcher__label">孩子</text>
-      <text class="switcher__value">{{ current ? current.name : '未添加' }}</text>
+      <text class="switcher__value">{{ display }}</text>
       <text class="switcher__caret">▾</text>
     </view>
 

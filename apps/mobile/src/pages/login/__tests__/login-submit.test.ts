@@ -9,6 +9,7 @@ vi.mock('../../../api/endpoints', () => ({
 }))
 
 import { authApi, familiesApi, invitesApi } from '../../../api/endpoints'
+import { ApiRequestError } from '../../../api/errors'
 import { useAuthStore } from '../../../stores/auth'
 import { useFamilyStore } from '../../../stores/family'
 import { useLoginForm } from '../use-login-form'
@@ -88,5 +89,58 @@ describe('useLoginForm.submit 的返回值', () => {
     expect(accept).toHaveBeenCalledWith('ABCD2345')
     expect(useFamilyStore().currentFamilyId).toBe('f-new')
     expect(uni.getStorageSync('currentFamilyId')).toBe('f-new')
+  })
+
+  it('账号早就存在时，加入家庭改用现有账号登录，不把邀请码丢掉', async () => {
+    // 家人扫进来的人十有八九上月就注册过了。停在"该账号已被使用"里，
+    // 他既登不进去也得重新去翻邀请码。
+    register.mockRejectedValue(new ApiRequestError('该账号已被使用', 409))
+    login.mockResolvedValue(session)
+    accept.mockResolvedValue({ id: 'f-new', name: '新家庭', ownerId: 'u9', role: 'MEMBER', archivedAt: null })
+    ;(familiesApi.list as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 'f-new', name: '新家庭', ownerId: 'u9', role: 'MEMBER', archivedAt: null },
+    ])
+
+    const form = useLoginForm()
+    form.mode.value = 'join'
+    form.form.username = 'mama2026'
+    form.form.password = 'pass12345'
+    form.form.nickname = '妈妈'
+    form.form.inviteCode = 'abcd2345'
+
+    await expect(form.submit()).resolves.toBe(true)
+    expect(login).toHaveBeenCalledWith('mama2026', 'pass12345')
+    expect(accept).toHaveBeenCalledWith('ABCD2345')
+    expect(form.usedExistingAccount.value).toBe(true)
+  })
+
+  it('账号已存在、密码又不对时返回 false，并报登录那句文案', async () => {
+    register.mockRejectedValue(new ApiRequestError('该账号已被使用', 409))
+    login.mockRejectedValue(new ApiRequestError('账号或密码不正确', 401))
+
+    const form = useLoginForm()
+    form.mode.value = 'join'
+    form.form.username = 'mama2026'
+    form.form.password = 'wrongpassword'
+    form.form.nickname = '妈妈'
+    form.form.inviteCode = 'abcd2345'
+
+    await expect(form.submit()).resolves.toBe(false)
+    expect(useAuthStore().error).toContain('账号或密码不正确')
+    expect(form.usedExistingAccount.value).toBe(false)
+    expect(accept).not.toHaveBeenCalled()
+  })
+
+  it('不是撞账号的失败不会顺带去登录', async () => {
+    register.mockRejectedValue(new ApiRequestError('服务暂时不可用，请稍后重试', 503))
+
+    const form = useLoginForm()
+    form.mode.value = 'register'
+    form.form.username = 'mama2026'
+    form.form.password = 'pass12345'
+    form.form.nickname = '妈妈'
+
+    await expect(form.submit()).resolves.toBe(false)
+    expect(login).not.toHaveBeenCalled()
   })
 })

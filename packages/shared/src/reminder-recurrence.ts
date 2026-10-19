@@ -56,6 +56,40 @@ export function isSupportedTimezone(tz: unknown): boolean {
   }
 }
 
+/** 某个时区的墙上钟点：用户在那块表上看到的时间和日期。 */
+export interface WallClock {
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+}
+
+/**
+ * 墙上钟点 → 真实 UTC 时刻。
+ *
+ * "明天早上 8 点"本身不是一个时刻，只有配上时区才是：同一份表单在 UTC+0
+ * 的设备上按设备算，会把上海家里的 8 点变成下午 4 点。写入必须走这里，
+ * 读取（formatDueIn / dayKeyIn）才和它对得上。
+ *
+ * 时区名不可用时返回 null，调用方自己兜底（宁可退回设备时间，也不要抛错）。
+ */
+export function instantFromWallClock(timezone: string, clock: WallClock): Date | null {
+  if (!isSupportedTimezone(timezone)) return null
+  const fmt = safeFormat(timezone)
+  if (!fmt) return null
+  return wallToInstant(timezone, fmt, packWall({ ...clock, second: 0 }))
+}
+
+/** 真实 UTC 时刻 → 某个时区的墙上钟点。时区不可用时返回 null。 */
+export function wallClockAt(timezone: string, instant: Date): WallClock | null {
+  if (!isSupportedTimezone(timezone)) return null
+  const fmt = safeFormat(timezone)
+  if (!fmt) return null
+  const { second, ...clock } = wallPartsOf(timezone, fmt, instant)
+  return clock
+}
+
 /** 把一个真实时刻拆成它在目标时区的墙上时间。 */
 function wallPartsOf(tz: string, fmt: Intl.DateTimeFormat, instant: Date): WallParts {
   const parts = fmt.formatToParts(instant)

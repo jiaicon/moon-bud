@@ -1,21 +1,27 @@
 import type { TodaySummary } from '../../events/summary'
 import { relativeTime } from '../../events/duplicate-warning'
 
-export type HomeView = 'retry' | 'create-family' | 'add-child' | 'ready'
+export type HomeView = 'loading' | 'child-retry' | 'retry' | 'create-family' | 'add-child' | 'ready'
 
 export interface HomeViewInput {
   /** 家庭列表这次请求失败了（而不是成功且为空）。 */
   familyLoadFailed: boolean
   familyId: string
   hasChild: boolean
+  /** 这个家庭的孩子名单是否已经读到过。没读到不等于没有。 */
+  childrenLoaded: boolean
+  /** 孩子名单这次请求失败了（而不是成功且为空）。 */
+  childrenLoadFailed: boolean
 }
 
 /**
  * 这个产品的首页一句话不能撒谎：加载失败必须长成"失败了，点此重试"，
  * 因为"今天还没有"在育儿记录里读起来就是"没人喂过孩子"，家长会据此再喂一次。
+ * 同一条理由管着孩子名单：还没读出来的那一瞬不是"这个家庭没有孩子"。
  */
 export function decideHomeView(input: HomeViewInput): HomeView {
   if (!input.familyId) return input.familyLoadFailed ? 'retry' : 'create-family'
+  if (!input.childrenLoaded) return input.childrenLoadFailed ? 'child-retry' : 'loading'
   if (!input.hasChild) return 'add-child'
   return 'ready'
 }

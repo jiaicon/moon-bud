@@ -10,6 +10,7 @@ import { useAuthStore } from '../../stores/auth'
 import { useChildStore } from '../../stores/child'
 import { useFamilyStore } from '../../stores/family'
 import { confirmDanger } from '../../utils/confirm'
+import { isoFromWallTime, wallFields } from '../../utils/wall-time'
 
 const authStore = useAuthStore()
 const familyStore = useFamilyStore()
@@ -37,13 +38,27 @@ const errors = reactive<Record<string, string>>({})
 const saving = ref(false)
 const members = ref<MemberDto[]>([])
 
-const now = new Date()
-const date = ref(fmt(now, 'date'))
-const time = ref(fmt(now, 'time'))
-
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
 const children = computed(() => childStore.childrenByFamily[familyId.value] ?? [])
 const timezone = computed(() => authStore.user?.timezone ?? 'Asia/Shanghai')
+
+// 表单上按的是钟点，预填就得按同一个时区的钟点读：跨时区设备上按设备本地预填，
+// 一进来显示的是一个和账号无关的时刻，而写入又按时区解释它。
+const initial = wallFields(timezone.value)
+const date = ref(initial.date)
+const time = ref(initial.time)
+
+/**
+ * 会话落定后补一次预填。直开深链接时 setup 里拿不到账号（tz 只能兜底），
+ * 补之前先看用户动过没有——预填不该把已经按好的时间抹掉。
+ */
+function syncWallPrefill(): void {
+  if (date.value !== initial.date || time.value !== initial.time) return
+  const next = wallFields(timezone.value)
+  date.value = next.date
+  time.value = next.time
+}
+
 const preset = computed(() => RRULE_PRESETS.find((p) => p.key === presetKey.value) ?? RRULE_PRESETS[0])
 const isEdit = computed(() => reminderId.value !== '')
 
@@ -58,19 +73,6 @@ function pickType(recurring: boolean): void {
     return
   }
   isRecurring.value = recurring
-}
-
-function fmt(d: Date, kind: 'date' | 'time'): string {
-  const p = (n: number) => String(n).padStart(2, '0')
-  return kind === 'date'
-    ? `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-    : `${p(d.getHours())}:${p(d.getMinutes())}`
-}
-
-function localIso(day: string, minute: string): string {
-  const [y, m, d] = day.split('-').map(Number)
-  const [hh, mm] = minute.split(':').map(Number)
-  return new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0).toISOString()
 }
 
 /** 自定义走拼装，预设直接用预设串：两条路都交给同一个校验口。 */
@@ -116,9 +118,11 @@ async function onSubmit(): Promise<void> {
   if (!validate()) return
   saving.value = true
   try {
+    // 一次性提醒也要带时区：dueAt 是按它算出来的，存下的 timezone 必须和算法一致，
+    // 否则列表按旧的时区念一个新的时刻。
     const schedule = isRecurring.value
       ? { rrule: currentRrule(), timezone: timezone.value }
-      : { dueAt: localIso(date.value, time.value) }
+      : { dueAt: isoFromWallTime(timezone.value, date.value, time.value), timezone: timezone.value }
     const shared = {
       childId: childId.value || null,
       assigneeId: assigneeId.value || null,
@@ -187,6 +191,10 @@ async function cancelReminder(): Promise<void> {
 }
 
 onLoad(async (query) => {
+  // 时区是账号属性，而账号要等冷启动的静默登录才落到 store：直开深链接时先等它，
+  // 否则预填按兜底时区算，用户看到一个和自己家无关的钟点。
+  if (!authStore.user) await authStore.bootstrap()
+  syncWallPrefill()
   await familyStore.load()
   if (!familyId.value) return
   await childStore.load(familyId.value)
@@ -206,9 +214,10 @@ onLoad(async (query) => {
     assigneeId.value = reminder.assigneeId ?? ''
     isRecurring.value = reminder.type === 'RECURRING'
     if (reminder.dueAt) {
-      const at = new Date(reminder.dueAt)
-      date.value = fmt(at, 'date')
-      time.value = fmt(at, 'time')
+      // 读回来也要按同一个时区念：用设备本地读会让"编辑—保存"每走一次就漂一格。
+      const at = wallFields(timezone.value, new Date(reminder.dueAt))
+      date.value = at.date
+      time.value = at.time
     }
     if (reminder.rrule) {
       const parsed = parseRruleForUi(reminder.rrule)

@@ -73,8 +73,20 @@ function intervalOf(rrule: string): string {
   return m ? m[1] : '?'
 }
 
-async function load(): Promise<void> {
-  if (!familyId.value || loading.value) return
+/**
+ * 切分段、下拉、回到本页都可能并发。被"正在加载"挡掉的那一次会让高亮的分段
+ * 和列表内容不是同一个筛选条件，所以排队串行，后一次一定真跑。
+ */
+let queue: Promise<void> = Promise.resolve()
+
+function load(): Promise<void> {
+  const next = queue.then(() => run())
+  queue = next.catch(() => undefined)
+  return next
+}
+
+async function run(): Promise<void> {
+  if (!familyId.value) return
   loading.value = true
   error.value = null
   try {

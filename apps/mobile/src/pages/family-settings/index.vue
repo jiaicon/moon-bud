@@ -29,6 +29,8 @@ const isOwner = computed(() => family.value?.role === 'OWNER')
 /** 改名后端只认 OWNER/ADMIN，归档只认 OWNER：给点不动的人留按钮比不显示更糟。 */
 const canManage = computed(() => isOwner.value || family.value?.role === 'ADMIN')
 const children = computed(() => childStore.childrenByFamily[familyId.value] ?? [])
+// 名单还没读到过的时候不能写"还没有孩子"。
+const childrenLoaded = computed(() => familyId.value in childStore.childrenByFamily)
 const leaveHint = computed(() =>
   isOwner.value
     ? '你是这个家庭的所有者：先在成员管理里把所有权转让给家人，否则退出会被拒绝 —— 家庭不能没人能管。退出后你的记录仍留在家庭里。'
@@ -167,7 +169,7 @@ onShow(() => void load())
             <text class="row__chevron">›</text>
           </view>
           <view v-if="!children.length" class="row row--empty">
-            <text class="row__meta">还没有孩子</text>
+            <text class="row__meta">{{ childrenLoaded ? '还没有孩子' : '正在读取孩子名单…' }}</text>
           </view>
           <view class="btn btn--ghost btn--sm" @click="goAddChild"><text class="btn__label">添加孩子</text></view>
         </view>

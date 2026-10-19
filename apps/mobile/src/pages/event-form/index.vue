@@ -15,11 +15,14 @@ import { eventToFormState, takeForEdit } from '../../events/event-edit'
 import { shouldWarnDuplicate } from '../../events/duplicate-warning'
 import { zhValidationMessage } from '../../events/validation-messages'
 import ThemeRoot from '../../components/ThemeRoot.vue'
+import { useAuthStore } from '../../stores/auth'
 import { useChildStore } from '../../stores/child'
 import { useFamilyStore } from '../../stores/family'
+import { isoFromWallTime, wallFields } from '../../utils/wall-time'
 
 const familyStore = useFamilyStore()
 const childStore = useChildStore()
+const authStore = useAuthStore()
 
 const type = ref<EventType | ''>('')
 const editingId = ref('')
@@ -30,18 +33,44 @@ const note = ref('')
 const duplicateHint = ref('')
 const saving = ref(false)
 
-const today = new Date()
-const date = ref(fmt(today, 'date'))
-const time = ref(fmt(today, 'time'))
+const familyId = computed(() => familyStore.currentFamilyId ?? '')
+/**
+ * 记录的时间按账号时区解释：列表里的"今天/昨天"和钟点都按它念（见 events/summary.ts），
+ * 写入若按设备本地换时刻，跨时区的设备上就会存进一个和所填钟点不符的时刻，
+ * 而且每次编辑再存都会把它按时区差推远一格。
+ */
+const timezone = computed(() => authStore.user?.timezone ?? 'Asia/Shanghai')
+
+// 预填也按同一个时区读"现在"，否则表单显示的是设备钟点、解释的却是账号钟点。
+const initial = wallFields(timezone.value)
+const date = ref(initial.date)
+const time = ref(initial.time)
 const endDate = ref('')
 const endTime = ref('')
 
-const familyId = computed(() => familyStore.currentFamilyId ?? '')
+/**
+ * 会话落定后补一次预填。直开深链接时 setup 里拿不到账号（时区只能兜底），
+ * 补之前先看用户动过没有——预填不该把已经按好的时间抹掉。
+ */
+function syncWallPrefill(): void {
+  if (date.value !== initial.date || time.value !== initial.time) return
+  const next = wallFields(timezone.value)
+  date.value = next.date
+  time.value = next.time
+}
+
 const child = computed(() => childStore.currentChild(familyId.value))
 const fields = computed<FieldSpec[]>(() => (type.value ? fieldsFor(type.value) : []))
 const meta = computed(() => (type.value ? EVENT_TYPE_META[type.value] : null))
 /** 只有睡眠需要"结束时间"，其它类型的时长写在 payload 里。 */
 const needsEnd = computed(() => type.value === 'sleep')
+/**
+ * 结束日期与钟点只选了其中一个。另一端没法凭空补：补 00:00 会造出一段
+ * 倒着走的睡眠，按发生日期补等于替用户编了一个他没选过的值。
+ */
+const halfFilledEnd = computed(
+  () => needsEnd.value && Boolean(endDate.value) !== Boolean(endTime.value),
+)
 
 const targetChildName = computed(() => {
   if (!editingId.value) return child.value ? child.value.name : '未选择孩子'
@@ -50,19 +79,6 @@ const targetChildName = computed(() => {
   )
   return found ? found.name : '（这条记录的孩子不在当前家庭里）'
 })
-
-function fmt(d: Date, kind: 'date' | 'time'): string {
-  const p = (n: number) => String(n).padStart(2, '0')
-  return kind === 'date'
-    ? `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-    : `${p(d.getHours())}:${p(d.getMinutes())}`
-}
-
-function localIso(day: string, minute: string): string {
-  const [y, m, d] = day.split('-').map(Number)
-  const [hh, mm] = minute.split(':').map(Number)
-  return new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0).toISOString()
-}
 
 function resetForm(): void {
   for (const key of Object.keys(values)) delete values[key]
@@ -101,6 +117,10 @@ function backToGrid(): void {
 }
 
 onLoad(async (query) => {
+  // 记录的起止钟点按账号时区解释，而账号是冷启动静默登录才落到 store 的：
+  // 直开深链接时先等它，不然预填出来的是兜底时区的钟点。
+  if (!authStore.user) await authStore.bootstrap()
+  syncWallPrefill()
   await familyStore.load()
   if (familyId.value) await childStore.load(familyId.value)
   const requested = String(query?.type ?? '')
@@ -117,7 +137,7 @@ onLoad(async (query) => {
     editingId.value = target.id
     editingChildId.value = target.childId
     type.value = target.type
-    const state = eventToFormState(target)
+    const state = eventToFormState(target, timezone.value)
     for (const [key, value] of Object.entries(state.values)) values[key] = value
     note.value = state.note
     date.value = state.date
@@ -129,8 +149,14 @@ onLoad(async (query) => {
   if (isEventType(requested)) chooseType(requested)
 })
 
-function buildPayload(): Record<string, unknown> {
+/**
+ * 收表单为 payload。返回 null 表示有字段填得不像数字：这些值不能当成"没填"
+ * 存下去——用户明明写了东西，存成缺字段就是把他记的东西扔掉。
+ */
+function buildPayload(): Record<string, unknown> | null {
+  for (const key of Object.keys(errors)) delete errors[key]
   const payload: Record<string, unknown> = {}
+  let blocked = false
   for (const field of fields.value) {
     const raw = (values[field.name] ?? '').trim()
     if (!raw) continue
@@ -139,6 +165,7 @@ function buildPayload(): Record<string, unknown> {
       // 非数字要在这里就报错：交给 zod 只会得到一句 "Expected number"，没人看得懂。
       if (!Number.isFinite(asNumber)) {
         errors[field.name] = `${field.label}请填写数字`
+        blocked = true
         continue
       }
       payload[field.name] = asNumber
@@ -146,7 +173,7 @@ function buildPayload(): Record<string, unknown> {
       payload[field.name] = raw
     }
   }
-  return payload
+  return blocked ? null : payload
 }
 
 function assignErrors(messages: string[]): void {
@@ -168,6 +195,11 @@ async function onSubmit(): Promise<void> {
     return
   }
   const payload = buildPayload()
+  if (!payload) return
+  if (halfFilledEnd.value) {
+    errors.end = '结束时间要把日期和钟点都选好，不然这段睡眠存不下'
+    return
+  }
   const result = validateEventPayload(type.value, payload)
   if (!result.ok) {
     assignErrors(result.errors)
@@ -183,8 +215,11 @@ async function onSubmit(): Promise<void> {
   const body = {
     childId,
     type: type.value,
-    occurredAt: localIso(date.value, time.value),
-    endedAt: needsEnd.value && endDate.value ? localIso(endDate.value, endTime.value || '00:00') : null,
+    occurredAt: isoFromWallTime(timezone.value, date.value, time.value),
+    endedAt:
+      needsEnd.value && endDate.value
+        ? isoFromWallTime(timezone.value, endDate.value, endTime.value || '00:00')
+        : null,
     payload: result.data,
     note: note.value.trim() || null,
   }
@@ -258,6 +293,7 @@ const goBack = () => uni.navigateBack()
               <text class="picker">{{ endTime || '未设置' }}</text>
             </picker>
           </view>
+          <text v-if="errors.end" class="field__error">{{ errors.end }}</text>
         </view>
 
         <view v-for="field in fields" :key="field.name" class="field">

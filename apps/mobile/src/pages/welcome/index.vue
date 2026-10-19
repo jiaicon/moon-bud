@@ -3,15 +3,23 @@ import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import ThemeSwitcher from '../../components/ThemeSwitcher.vue'
+import { useAuthStore } from '../../stores/auth'
 import { hasPreviewVisited } from '../../utils/preview-visited'
 
+const authStore = useAuthStore()
 const registerLabel = ref('开始使用')
 const expired = ref(false)
 
 // 会话过期被踢回来时得说清楚为什么，并且给一条回去的路：
 // 欢迎页原本只有"注册/加入"，重新登录的人在这里找不到门。
-onLoad((query) => {
+onLoad(async (query) => {
   expired.value = String(query?.expired ?? '') === '1'
+  // 人刚被踢回来，正要在这里重新登录：这时别去等会话、也别往首页送。
+  if (expired.value) return
+  // Android 的启动页就是这一页。会话还有效的人不该被当成游客重新介绍一遍，
+  // 而 isLoggedIn 读的是内存态，冷启动时必须先等静默登录落定。
+  if (authStore.status === 'loading') await authStore.bootstrap()
+  if (authStore.isLoggedIn) uni.switchTab({ url: '/pages/home/index' })
 })
 
 // 游客看过预览却没注册就离开，下次启动应当被引导回"完成注册"，而不是从头再挑一遍配色。

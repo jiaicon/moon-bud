@@ -79,6 +79,8 @@ export function useLoginForm() {
   })
   const errors = ref<Record<string, string>>({})
   const loading = ref(false)
+  /** 这次提交其实是"用已有账号登录"，页面要说清楚，别让人以为新建了账号。 */
+  const usedExistingAccount = ref(false)
 
   function validate(): boolean {
     errors.value = validateLoginForm({
@@ -98,17 +100,27 @@ export function useLoginForm() {
   async function submit(): Promise<boolean> {
     if (loading.value || !validate()) return false
     loading.value = true
+    usedExistingAccount.value = false
     try {
+      const username = normalizeUsername(form.username)
       const ok =
         mode.value === 'login'
-          ? await authStore.login(normalizeUsername(form.username), form.password)
+          ? await authStore.login(username, form.password)
           : await authStore.register({
-              username: normalizeUsername(form.username),
+              username,
               password: form.password,
               nickname: form.nickname.trim(),
               timezone: form.timezone,
             })
-      if (!ok || mode.value !== 'join') return ok
+      // 扫邀请码进来的人常常早就有账号。撞车就当登录再走一次：
+      // 停在"该账号已被使用"里既进不去，手里的邀请码也白抄一遍。
+      if (!ok && mode.value !== 'login' && authStore.errorStatus === 409) {
+        if (!(await authStore.login(username, form.password))) return false
+        usedExistingAccount.value = true
+      } else if (!ok) {
+        return false
+      }
+      if (mode.value !== 'join') return true
 
       try {
         const family = await invitesApi.accept(normalizeInviteCode(form.inviteCode))
@@ -126,5 +138,5 @@ export function useLoginForm() {
     }
   }
 
-  return { mode, form, errors, loading, validate, submit }
+  return { mode, form, errors, loading, usedExistingAccount, validate, submit }
 }

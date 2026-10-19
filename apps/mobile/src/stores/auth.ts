@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import type { UserDto } from '@moonbud/shared'
+import { ApiRequestError } from '../api/errors'
 import { renewAccessToken, setAccessToken, setRefreshHandler, setSessionExpiredHandler } from '../api/http'
 import { authApi, meApi } from '../api/endpoints'
 import { clearPreviewVisited } from '../utils/preview-visited'
@@ -21,6 +22,8 @@ export const useAuthStore = defineStore('auth', {
     mustChangePassword: false,
     status: 'idle' as 'idle' | 'loading' | 'error',
     error: null as string | null,
+    /** 最近一次失败的 HTTP 状态码（网络失败是 0）。"账号已存在"这种要据此决定下一步，光看文案太脆。 */
+    errorStatus: 0,
   }),
 
   getters: {
@@ -52,7 +55,7 @@ export const useAuthStore = defineStore('auth', {
     }): Promise<boolean> {
       this.ensureRefreshHandler()
       this.status = 'loading'
-      this.error = null
+      this.clearError()
       try {
         this.applySession(await authApi.register(input))
         return true
@@ -65,7 +68,7 @@ export const useAuthStore = defineStore('auth', {
     async login(username: string, password: string): Promise<boolean> {
       this.ensureRefreshHandler()
       this.status = 'loading'
-      this.error = null
+      this.clearError()
       try {
         this.applySession(await authApi.login(username, password))
         return true
@@ -77,7 +80,7 @@ export const useAuthStore = defineStore('auth', {
 
     async changePassword(oldPassword: string, newPassword: string): Promise<boolean> {
       this.status = 'loading'
-      this.error = null
+      this.clearError()
       try {
         this.applySession(await authApi.changePassword(oldPassword, newPassword))
         return true
@@ -148,7 +151,7 @@ export const useAuthStore = defineStore('auth', {
       this.user = res.user
       this.mustChangePassword = res.mustChangePassword
       this.status = 'idle'
-      this.error = null
+      this.clearError()
     },
 
     clearSession() {
@@ -168,9 +171,15 @@ export const useAuthStore = defineStore('auth', {
       uni.reLaunch({ url: '/pages/welcome/index?expired=1' })
     },
 
+    clearError() {
+      this.error = null
+      this.errorStatus = 0
+    },
+
     fail(err: unknown) {
       this.status = 'error'
       this.error = err instanceof Error ? err.message : '请求失败，请稍后重试'
+      this.errorStatus = err instanceof ApiRequestError ? err.statusCode : 0
     },
   },
 })

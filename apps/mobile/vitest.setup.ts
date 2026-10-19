@@ -9,6 +9,8 @@ const storage = new Map<string, unknown>()
   showModal: (opts: { success?: (res: { confirm: boolean }) => void }) => opts.success?.({ confirm: false }),
   setNavigationBarColor: () => {},
   setTabBarStyle: () => {},
+  setTabBarBadge: () => {},
+  removeTabBarBadge: () => {},
   showToast: () => {},
   reLaunch: () => {},
   request: () => {

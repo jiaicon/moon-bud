@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
-import { computeDueAt, type MemberDto, type ReminderDto, type ReminderListFilter } from '@moonbud/shared'
+import type { MemberDto, ReminderDto, ReminderListFilter } from '@moonbud/shared'
 import { membersApi, remindersApi } from '../../api/endpoints'
 import { resyncActiveReminderSchedules, assigneeLabel } from '../../notifications/reminder-arming'
-import { formatDueIn } from '../../reminders/due-label'
+import { refreshUnreadTabBadge } from '../../notifications/tab-badge'
+import { reminderCardLabel } from '../../reminders/card-label'
 import EmptyState from '../../components/EmptyState.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useFamilyStore } from '../../stores/family'
@@ -27,48 +28,10 @@ const error = ref<string | null>(null)
 
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
 
-// 卡片上的"该谁"和推送正文必须是同一句话，所以用同一个函数，别各写一份。
-const whoLabel = (assigneeId: string | null) => assigneeLabel(members.value, assigneeId)
-
 /**
- * 后端列表里重复提醒的 dueAt 是 null（下一次由调度器按周期展开），
- * 直接显示会得到"下次 待定"。客户端用同一个 computeDueAt 把下次触发算出来，
- * 家长才知道"今天这点还要不要做"。
+ * 卡片上"该谁"和推送正文必须是同一句话，所以用同一个函数，别各写一份。
  */
-function nextDue(reminder: ReminderDto): Date | null {
-  if (reminder.type === 'ONE_TIME') return reminder.dueAt ? new Date(reminder.dueAt) : null
-  if (reminder.dueAt) {
-    const at = new Date(reminder.dueAt)
-    if (!Number.isNaN(at.getTime()) && at.getTime() > Date.now()) return at
-  }
-  return computeDueAt({
-    type: reminder.type,
-    dueAt: reminder.dueAt ? new Date(reminder.dueAt) : null,
-    rrule: reminder.rrule,
-    timezone: reminder.timezone,
-    after: new Date(),
-  })
-}
-
-function dueLabel(reminder: ReminderDto): string {
-  const next = nextDue(reminder)
-  if (reminder.type === 'ONE_TIME') return next ? formatDueIn(reminder.timezone, next) : '未设定时间'
-  const time = next ? formatDueIn(reminder.timezone, next) : '待调度'
-  return `${RRULE_HINT(reminder.rrule)} · 下次 ${time}`
-}
-
-const RRULE_HINT = (rrule: string | null): string => {
-  if (!rrule) return '重复'
-  if (rrule.includes('FREQ=DAILY')) return rrule.includes('INTERVAL') ? `每 ${intervalOf(rrule)} 天` : '每天'
-  if (rrule.includes('FREQ=WEEKLY')) return '每周'
-  if (rrule.includes('FREQ=MONTHLY')) return '每月'
-  return '重复'
-}
-
-function intervalOf(rrule: string): string {
-  const m = /INTERVAL=(\d+)/.exec(rrule)
-  return m ? m[1] : '?'
-}
+const whoLabel = (assigneeId: string | null) => assigneeLabel(members.value, assigneeId)
 
 /**
  * 切分段、下拉、回到本页都可能并发。被"正在加载"挡掉的那一次会让高亮的分段
@@ -144,6 +107,8 @@ onShow(() => {
     tabIndex.value = 0
   }
   if (ready) void load()
+  // 这一格头顶的数字就是本页的入口信号：读完通知切回来要跟着掉。
+  void refreshUnreadTabBadge()
 })
 
 onPullDownRefresh(() => {
@@ -175,7 +140,7 @@ onPullDownRefresh(() => {
         <view v-for="item in reminders" :key="item.id" class="card" @click="goDetail(item.id)">
           <view class="card__main">
             <text class="card__title">{{ item.title }}</text>
-            <text class="card__due">{{ dueLabel(item) }}</text>
+            <text class="card__due">{{ reminderCardLabel(item) }}</text>
             <text v-if="item.note" class="card__note">{{ item.note }}</text>
           </view>
           <view class="card__side">

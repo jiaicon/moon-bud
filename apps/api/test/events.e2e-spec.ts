@@ -222,6 +222,34 @@ describe('记录', () => {
     ])
   })
 
+  it('可以只看某一个人记的（记录人筛选）', async () => {
+    const member = await register('ev_writer2')
+    await prisma.familyMember.create({ data: { familyId, userId: member.id, role: 'MEMBER' } })
+    await post({
+      childId,
+      type: 'feeding',
+      occurredAt: '2026-10-16T01:00:00.000Z',
+      payload: { method: 'breast' },
+    }).expect(201)
+    await request(app.getHttpServer())
+      .post(`/api/families/${familyId}/events`)
+      .set('Authorization', `Bearer ${member.token}`)
+      .send({ childId, type: 'feeding', occurredAt: '2026-10-16T02:00:00.000Z', payload: { method: 'bottle' } })
+      .expect(201)
+
+    const mine = await list(`createdBy=${me.id}&type=feeding`).expect(200)
+    expect(mine.body.items.map((e: { createdBy: string }) => e.createdBy)).toEqual([me.id])
+
+    // 不是这个家庭的成员、或根本不存在的人：筛出空列表，而不是报错——
+    // 报错会把"这个 userId 存不存在"泄露给调用方。
+    const stranger = await list(`createdBy=00000000-0000-4000-8000-000000000000`).expect(200)
+    expect(stranger.body.items).toEqual([])
+    expect(stranger.body.total).toBe(0)
+
+    // 不是 UUID 的一律 400，不静默当成"没人记过"。
+    await list('createdBy=not-a-uuid').expect(400)
+  })
+
   it('编辑记录会重跑 payload 校验，并记下 updatedBy', async () => {
     const created = await post({
       childId,

@@ -79,6 +79,8 @@ export const MOCK_REMINDERS: ReminderDto[] = [
     status: 'ACTIVE',
     createdBy: OWNER_ID,
     createdAt: minutesAgo(300),
+    // 预览要能演示出"还欠哪一次"这行文案，不然游客看到的永远是还没到点的样子。
+    overdueSince: minutesAgo(45),
   },
   {
     id: 'r-future',
@@ -94,6 +96,7 @@ export const MOCK_REMINDERS: ReminderDto[] = [
     status: 'ACTIVE',
     createdBy: OWNER_ID,
     createdAt: minutesAgo(1_440),
+    overdueSince: null,
   },
 ]
 

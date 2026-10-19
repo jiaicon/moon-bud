@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { EVENT_TYPES, type EventDto, type EventType } from '@moonbud/shared'
+import { EVENT_TYPES, type EventDto, type EventType, type MemberDto } from '@moonbud/shared'
 import { onLoad, onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import { computed, getCurrentInstance, nextTick, ref, watch, type Ref } from 'vue'
-import { eventsApi } from '../../api/endpoints'
+import { eventsApi, membersApi } from '../../api/endpoints'
 import { canModifyEvent, stageForEdit } from '../../events/event-edit'
 import { centerScrollLeft } from '../../events/chip-scroll'
 import { EVENT_TYPE_META } from '../../events/event-fields'
 import { groupByDay } from '../../events/day-groups'
+import { buildEventQuery, emptyListCopy, recorderOptions } from '../../events/list-filters'
+import { refreshUnreadTabBadge } from '../../notifications/tab-badge'
 import { formatEventLine } from '../../events/format-event'
 import { confirmDanger } from '../../utils/confirm'
 import EmptyState from '../../components/EmptyState.vue'
@@ -28,6 +30,10 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const typeFilter = ref<EventType | ''>('')
 const typeSheetOpen = ref(false)
+const recorderFilter = ref<string>('')
+/** 这一家的成员。空数组既可能是"只有我一个人"，也可能是"还没读到"，页面不替用户猜。 */
+const members = ref<MemberDto[]>([])
+const recorders = computed(() => recorderOptions(members.value, authStore.user?.id ?? ''))
 
 /** 抽屉里要列全：横滑的 tabs 看不见不代表没有这一类。 */
 const typeOptions = computed<{ value: EventType | ''; label: string }[]>(() => [
@@ -46,6 +52,20 @@ const childrenLoadFailed = computed(
 )
 const hasMore = computed(() => events.value.length < total.value)
 
+/**
+ * 筛出来是空的 ≠ 家里没有记录。把筛项念出来，用户才知道自己筛的是"爷爷 + 喂奶"
+ * 而不是"这个家什么都没记过"——后者会让人以为记录丢了。
+ */
+const emptyCopy = computed(() =>
+  emptyListCopy([
+    typeFilter.value ? EVENT_TYPE_META[typeFilter.value].label : '',
+    childId.value ? children.value.find((c) => c.id === childId.value)?.name ?? '这个孩子' : '',
+    recorderFilter.value
+      ? recorders.value.find((o) => o.value === recorderFilter.value)?.label ?? '这个人'
+      : '',
+  ].filter(Boolean)),
+)
+
 /** 按天分组：家长回忆"那天下午"，不是"14:32 那条"。 */
 const timezone = computed(() => authStore.user?.timezone ?? 'Asia/Shanghai')
 const groups = computed(() => groupByDay(events.value, timezone.value))
@@ -56,12 +76,10 @@ async function run(reset: boolean): Promise<void> {
   error.value = null
   const next = reset ? 1 : page.value + 1
   try {
-    const res = await eventsApi.list(familyId.value, {
-      childId: childId.value || undefined,
-      type: typeFilter.value || undefined,
-      page: next,
-      pageSize: PAGE_SIZE,
-    })
+    const res = await eventsApi.list(
+      familyId.value,
+      buildEventQuery({ type: typeFilter.value, childId: childId.value, createdBy: recorderFilter.value }, next, PAGE_SIZE),
+    )
     events.value = reset ? res.items : [...events.value, ...res.items]
     total.value = res.total
     page.value = next
@@ -85,13 +103,30 @@ function load(reset: boolean): Promise<void> {
   return next
 }
 
+/**
+ * "按记录人筛"那一行的名单，问服务端要：记录里出现过哪些人 ≠ 这家有哪几个人
+ * （某人这一个月没记过任何东西，他不该从筛项里消失）。
+ *
+ * 读失败就留空，那一行不画：没有筛项可用顶多是少个便利，画一排猜出来的名字是骗人。
+ */
+async function loadMembers(): Promise<void> {
+  if (!familyId.value) return
+  try {
+    members.value = await membersApi.list(familyId.value)
+  } catch {
+    members.value = []
+  }
+}
+
 // onLoad 里已经拉过一次；onShow 只负责"从别处回到本页"的那些场合。
 // 用 ready 而不是"列表非空"来判定：第一条记录保存回来时列表正是空的。
 let ready = false
 
 onLoad(async () => {
   await familyStore.load()
-  if (familyId.value) await childStore.load(familyId.value)
+  if (familyId.value) {
+    await Promise.all([childStore.load(familyId.value), loadMembers()])
+  }
   await load(true)
   ready = true
 })
@@ -100,19 +135,23 @@ onLoad(async () => {
 // 任何回到本页的路径都会触发，不只是保存成功那一条。
 onShow(() => {
   if (ready) void load(true)
+  // tabBar 这时才挂载好，冷启动的 App.onShow 里画角标会落空，得在落地页补。
+  void refreshUnreadTabBadge()
 })
 
 // 换家庭时孩子缓存属于上一个家庭：不重拉就把"有孩子的家庭"说成没有孩子，
 // 而且 childId 为空时列表请求不带过滤条件，全家记录混在一起。
 watch(familyId, async (next, prev) => {
   if (!next || next === prev || !ready) return
-  await childStore.load(next)
+  // 上一个家庭的成员与"筛着某个人"在这里都没有意义：名单重拉，筛项清空。
+  recorderFilter.value = ''
+  await Promise.all([childStore.load(next), loadMembers()])
   await load(true)
 })
 
 // 转圈由发起刷新的这一侧来停：run 里的提前 return（还没有家庭）不会走到 finally。
 onPullDownRefresh(() => {
-  void load(true).finally(() => uni.stopPullDownRefresh())
+  void Promise.all([load(true), loadMembers()]).finally(() => uni.stopPullDownRefresh())
 })
 onReachBottom(() => {
   if (hasMore.value && !loading.value) void load(false)
@@ -130,6 +169,12 @@ function pickChild(next: string) {
   void load(true)
 }
 
+function pickRecorder(next: string) {
+  if (recorderFilter.value === next) return
+  recorderFilter.value = next
+  void load(true)
+}
+
 /**
  * 选中的芯片滚到容器中间：横滑条上"当前筛的是哪一类"不该藏在屏幕外，
  * 从右侧抽屉里选完尤其如此 —— 抽屉列的是全集，滑不到那一项。
@@ -139,8 +184,10 @@ function pickChild(next: string) {
 const instance = getCurrentInstance()
 const typeScrollLeft = ref(0)
 const childScrollLeft = ref(0)
+const recorderScrollLeft = ref(0)
 const typeIndex = computed(() => typeOptions.value.findIndex((o) => o.value === typeFilter.value))
 const childIndex = computed(() => children.value.findIndex((c) => c.id === childId.value))
+const recorderIndex = computed(() => recorders.value.findIndex((o) => o.value === recorderFilter.value))
 
 function centerChip(containerId: string, rowId: string, chipId: string, index: number, target: Ref<number>): void {
   if (!instance || index < 0) return
@@ -176,9 +223,10 @@ function applyScroll(target: Ref<number>, value: number): void {
   })
 }
 
-watch([typeIndex, childIndex], ([t, c]) => {
+watch([typeIndex, childIndex, recorderIndex], ([t, c, r]) => {
   centerChip('type-chips', 'type-chip-row', `chip-type-${t}`, t, typeScrollLeft)
   centerChip('child-chips', 'child-chip-row', `chip-child-${c}`, c, childScrollLeft)
+  centerChip('recorder-chips', 'recorder-chip-row', `chip-recorder-${r}`, r, recorderScrollLeft)
 }, { flush: 'post' })
 
 /** 抽屉里点一次就完事：选完立刻收起，不然用户还得再点一次遮罩。 */
@@ -312,6 +360,29 @@ async function removeEvent(event: EventDto): Promise<void> {
               </view>
             </view>
           </scroll-view>
+
+          <!-- 一家只有一个人时"谁记的"没有可筛的，这一行就不出现。 -->
+          <scroll-view
+            v-if="recorders.length > 1"
+            id="recorder-chips"
+            scroll-x
+            class="chips"
+            :show-scrollbar="false"
+            :scroll-left="recorderScrollLeft"
+          >
+            <view id="recorder-chip-row" class="chip-row">
+              <view
+                v-for="(r, ri) in recorders"
+                :id="`chip-recorder-${ri}`"
+                :key="r.value"
+                class="chip"
+                :class="{ 'chip--active': r.value === recorderFilter }"
+                @click="pickRecorder(r.value)"
+              >
+                <text class="chip__label">{{ r.label }}</text>
+              </view>
+            </view>
+          </scroll-view>
         </view>
 
         <text v-if="error" class="timeline__error">{{ error }}</text>
@@ -334,8 +405,8 @@ async function removeEvent(event: EventDto): Promise<void> {
         <empty-state
           v-if="!loading && !groups.length && !error"
           icon="🌱"
-          title="还没有记录"
-          hint="点右下角 ＋，喂奶、换尿布、睡觉都能记一条。"
+          :title="emptyCopy.title"
+          :hint="emptyCopy.hint"
         />
         <text v-if="loading" class="timeline__loading">加载中…</text>
       </template>

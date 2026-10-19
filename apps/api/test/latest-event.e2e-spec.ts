@@ -121,6 +121,29 @@ describe('最近一条记录', () => {
       .expect(403)
   })
 
+  it('归档孩子的“最近一条”照样读得到：归档挡的是写，不是读', async () => {
+    await postEvent({
+      type: 'feeding',
+      occurredAt: new Date(Date.now() - 600_000).toISOString(),
+      payload: { method: 'breast' },
+    }).expect(201)
+    await request(app.getHttpServer())
+      .delete(`/api/families/${familyId}/children/${childId}`)
+      .set('Authorization', `Bearer ${me.token}`)
+      .expect(204)
+
+    // 事件列表对同一个孩子是 200，读接口不能因为孩子归档就 400。
+    const res = await get().expect(200)
+    expect(res.body.event).not.toBeNull()
+
+    // 写路径的边界一分不能松：往归档孩子身上加记录仍然被挡。
+    await postEvent({
+      type: 'feeding',
+      occurredAt: new Date().toISOString(),
+      payload: { method: 'breast' },
+    }).expect(400)
+  })
+
   it('别的家庭的孩子：本家庭读不到它的最近记录', async () => {
     const other = await request(app.getHttpServer())
       .post('/api/auth/register')

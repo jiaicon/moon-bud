@@ -9,6 +9,7 @@ import { eventsApi, remindersApi } from '../../api/endpoints'
 import { EVENT_TYPE_META } from '../../events/event-fields'
 import { buildTodaySummary, type TodaySummary } from '../../events/summary'
 import { buildOverviewRows, decideHomeView } from './home-view'
+import { refreshUnreadTabBadge } from '../../notifications/tab-badge'
 import { useAuthStore } from '../../stores/auth'
 import { useChildStore } from '../../stores/child'
 import { useFamilyStore } from '../../stores/family'
@@ -102,6 +103,8 @@ onLoad(async () => {
 onShow(() => {
   guardForcedChange()
   void refresh()
+  // tabBar 这时已经挂载，而冷启动的 App.onShow 早于它：角标要在落地页补这一下。
+  void refreshUnreadTabBadge()
 })
 
 onPullDownRefresh(() => {

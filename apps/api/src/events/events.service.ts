@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
-import type { Event, FamilyRole, Prisma } from '@prisma/client'
+import type { Child, Event, FamilyRole, Prisma } from '@prisma/client'
 import {
   validateEventPayload,
   validateNote,
@@ -40,7 +40,7 @@ export class EventsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(familyId: string, userId: string, dto: CreateEventDto): Promise<EventDto> {
-    await this.assertChildInFamily(dto.childId, familyId)
+    await this.assertChildWritable(dto.childId, familyId)
 
     const payload = validatePayloadOrThrow(dto.type, dto.payload)
     assertNoteOrThrow(dto.note)
@@ -78,6 +78,7 @@ export class EventsService {
       deletedAt: null,
       ...(query.childId ? { childId: query.childId } : {}),
       ...(query.type ? { type: query.type } : {}),
+      ...(query.createdBy ? { createdBy: query.createdBy } : {}),
       ...(query.from || upper
         ? {
             occurredAt: {
@@ -182,19 +183,29 @@ export class EventsService {
     type: EventType,
     until: Date,
   ): Promise<EventDto | null> {
-    await this.assertChildInFamily(childId, familyId)
+    await this.findChildInFamily(childId, familyId)
     return this.findLatestByType(childId, type, until)
   }
 
   /**
    * 记录必须挂在**本家庭**的孩子上。少了这一步，任何成员都能把记录写进
    * 别家的孩子，而记录本身会带着本家庭的 familyId——数据从此自相矛盾。
+   *
+   * 这里不挡归档：归档的边界是"不再往身上写"，不是把这家人的历史藏起来。
+   * 读接口（最近一条、记录列表）要的正是那份历史，同一个孩子不能一处读得到、
+   * 另一处 400。
    */
-  private async assertChildInFamily(childId: string, familyId: string): Promise<void> {
+  private async findChildInFamily(childId: string, familyId: string): Promise<Child> {
     const child = await this.prisma.child.findUnique({ where: { id: childId } })
     if (!child || child.familyId !== familyId) {
       throw new BadRequestException('孩子不存在或不属于该家庭')
     }
+    return child
+  }
+
+  /** 写路径的边界：本家庭 + 未归档。 */
+  private async assertChildWritable(childId: string, familyId: string): Promise<void> {
+    const child = await this.findChildInFamily(childId, familyId)
     if (child.archivedAt !== null) {
       throw new BadRequestException('该孩子已归档，无法新增记录')
     }

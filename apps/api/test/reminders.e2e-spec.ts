@@ -266,6 +266,80 @@ describe('提醒', () => {
     expect(ids).not.toContain(future.body.id)
   })
 
+  /**
+   * 待办列表里重复提醒的 dueAt 是 null，客户端于是只能说"下次 明天 05:00"——
+   * 而家长今早那次根本没做，这件事在待办里一个字都不提。
+   * `overdueSince` 把"最早那条还没做的过期实例"交给客户端，它才知道该说哪一句。
+   */
+  it('列表带出 overdueSince：最早那条还没做的过期实例', async () => {
+    const missed = await post({
+      childId,
+      title: '该吃的',
+      type: 'RECURRING',
+      rrule: 'FREQ=DAILY;BYHOUR=8;BYMINUTE=0',
+      timezone: 'Asia/Shanghai',
+    }).expect(201)
+    const upcoming = await post({
+      childId,
+      title: '还没到',
+      type: 'ONE_TIME',
+      dueAt: new Date(Date.now() + 6 * 3600_000).toISOString(),
+      timezone: 'Asia/Shanghai',
+    }).expect(201)
+    await occurrences(missed.body.id).expect(200)
+
+    const res = await list('?status=ACTIVE').expect(200)
+    const rowOf = (id: string) => res.body.items.find((x: { id: string }) => x.id === id)
+    expect(Date.parse(rowOf(missed.body.id).overdueSince)).toBeLessThan(Date.now())
+    expect(rowOf(upcoming.body.id).overdueSince).toBeNull()
+  })
+
+  it('完成本次之后 overdueSince 就空了：待办不能继续指着做过的那一次', async () => {
+    const r = await post({
+      childId,
+      title: '该吃的',
+      type: 'RECURRING',
+      rrule: 'FREQ=DAILY;BYHOUR=8;BYMINUTE=0',
+      timezone: 'Asia/Shanghai',
+    }).expect(201)
+    const occ = await occurrences(r.body.id).expect(200)
+    const first = occ.body.filter(
+      (o: { status: string; dueAt: string }) => o.status === 'PENDING' && Date.parse(o.dueAt) < Date.now(),
+    )
+    expect(first.length).toBeGreaterThan(0)
+
+    const done = await complete(r.body.id, { occurrenceId: first[0].id }).expect(200)
+    expect(done.body.overdueSince).toBeNull()
+
+    const res = await list('?status=ACTIVE').expect(200)
+    expect(res.body.items.find((x: { id: string }) => x.id === r.body.id).overdueSince).toBeNull()
+    // 这一家已经没有任何过期的东西了，OVERDUE 也该跟着空
+    const ovy = await list('?status=OVERDUE').expect(200)
+    expect(ovy.body.total).toBe(0)
+  })
+
+  it('错过两次时说的是最早那一次', async () => {
+    const r = await post({
+      childId,
+      title: '每天两次都没做',
+      type: 'RECURRING',
+      rrule: 'FREQ=DAILY;BYHOUR=8;BYMINUTE=0',
+      timezone: 'Asia/Shanghai',
+    }).expect(201)
+    // 手工写进 3 天前的实例：回看窗口只到 24 小时，测试要的是"多条里挑最早"。
+    const now = Date.now()
+    await prisma.reminderOccurrence.createMany({
+      data: [
+        { reminderId: r.body.id, dueAt: new Date(now - 2 * 86_400_000) },
+        { reminderId: r.body.id, dueAt: new Date(now - 86_400_000) },
+      ],
+    })
+
+    const res = await list().expect(200)
+    const row = res.body.items.find((x: { id: string }) => x.id === r.body.id)
+    expect(Math.abs(Date.parse(row.overdueSince) - (now - 2 * 86_400_000))).toBeLessThan(1000)
+  })
+
   it('assigneeId 必须是本家庭成员，childId 必须属于本家庭', async () => {
     await post({
       childId,

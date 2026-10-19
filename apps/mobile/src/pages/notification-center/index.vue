@@ -2,6 +2,7 @@
 import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import { notificationsApi } from '../../api/endpoints'
+import { refreshUnreadTabBadge } from '../../notifications/tab-badge'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useAuthStore } from '../../stores/auth'
 import { wallStamp } from '../../utils/wall-time'
@@ -58,6 +59,9 @@ async function markRead(item: NotificationDto): Promise<void> {
   try {
     await notificationsApi.markRead(item.id)
     item.readAt = new Date().toISOString()
+    // 角标数的是服务端的未读总数，本页只改了自己手里这一条的读标记，
+    // 不补这一下，头顶那一格会继续显示旧数字。
+    void refreshUnreadTabBadge()
   } catch (err) {
     uni.showToast({ title: err instanceof Error ? err.message : '标记失败', icon: 'none' })
   }
@@ -84,6 +88,7 @@ async function readAll(): Promise<void> {
   // 头顶的"N 条未读"读的是服务端的 total：不重取，它会停在旧数字上，
   // 而列表里的红点已经全灭了。
   await load(true)
+  void refreshUnreadTabBadge()
 }
 
 function toggleFilter(): void {

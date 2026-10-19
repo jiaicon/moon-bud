@@ -93,12 +93,17 @@ dfb9ee4 feat(api): add member management with last-owner invariant
 
 1. **`GET /api/families/:familyId/reminders?status=ACTIVE` 会包含已过期但未完成的提醒；
    `?status=OVERDUE` 是更窄的筛（ACTIVE + 有过去的 PENDING 实例）。** 两者**不是**分区。
-   提醒页是"待办 / 已过期 / 已完成"三段式，若前端希望它们是互斥的，需要在 mobile 计划里
-   明确，并决定是改后端筛选还是前端自己过滤（这条是 api 计划 Task 9 留下的）。
+   ✅ 已定（2026-10-19）：**不改成互斥**，让重叠成为可见的信息。列表 DTO 新增
+   `overdueSince`（最早那条"到点还没做"的实例，无则 null，只有读接口会填），
+   待办的卡片因此念成"每天 · 还欠 今天 08:00"而不是只报"下次 明天 08:00"；
+   "已过期"仍然是"待办里欠着的那一部分"的筛，不是待办的补集。
 2. **`GET /api/families/:familyId/children/:childId/events/latest` 对归档孩子返回 400**，
-   而同一孩子的记录列表 `GET .../events?childId=` 返回 200（前者复用了创建路径的
-   `assertChildInFamily`，它连归档一起拒）。归档孩子在客户端不可见，所以影响很小，
-   但这是一个读接口的不一致，愿改就在 mobile 计划或一个小补丁里改。
+   而同一孩子的记录列表 `GET .../events?childId=` 返回 200。
+   ✅ 已修（2026-10-19）：`events.service.ts` 里的孩子校验拆成两层——
+   `findChildInFamily`（只问"是不是本家的孩子"，读路径用它）与
+   `assertChildWritable`（本家 + 未归档，只有 `create()` 用）。
+   归档的边界是"不再往身上写"，不是把这家人的历史藏起来。
+   e2e：新增"归档孩子的最近一条照样读得到"，同一条用例里守住写路径仍然 400。
 
 ## 环境状态
 
@@ -237,6 +242,152 @@ H5 实证：一个家庭里放一条过期的一次性 + 一条每天的重复�
 
 H5 实证：给"每天该称重量"排上 19/20/21 号 21:00 三行，归档掉最后一家后重算，登记表空了。
 
+### 2026-10-19（周一）深夜（三）：待办要说得出重复提醒"欠的是哪一次"
+
+**#41 的余波**：首页横幅的"已过期"数改对之后，待办列表里那条提醒仍然只说
+"每天 · 下次 明天 05:00"，绝口不提今早 05:00 那次谁都没点。根因不是显示文案，
+而是**客户端算不出"哪一次已被做过"**：它看得见 rrule，看不见某条实例被家人
+在另一台手机上点成了 DONE，按周期回推会把"昨晚做过的"也说成没过。所以这件事
+必须由服务端回答。
+
+- **DTO 加 `overdueSince: string | null`**（`packages/shared/src/api-types.ts`）：
+  最早那条 `PENDING && dueAt < now` 的实例。只有读接口填——
+  `list()`（整页一次 `findMany` + 内存取最早，不是每条一发）、`detail()`、
+  `complete()`（回的是"做完这一次之后"还欠着的最早那次，没有就 null）。
+  `create()/update()` 保持 null：那时还没有任何实例，编一个时间是说谎。
+- **`list()` 里不调 `materializeDue()`**：那会让每一次翻页都全表扫 ACTIVE 提醒，
+  而分钟级 cron 已经覆盖了补齐；`detail()` 保留补齐（单条便宜，且客户端等着看"今天这次"）。
+- **客户端** `src/reminders/card-label.ts`（新）把页面里的 `nextDue / RRULE_HINT /
+  intervalOf` 收进来，`reminderCardLabel(reminder, now)` 三态分明：
+  欠着 → "每天 · 还欠 今天 08:00"；没到 → "每天 · 下次 今天 20:00"；
+  一次性没设时间 → "未设定时间"；算不出下次 → "重复 · 下次 待定"。
+  `due-label.ts` 新增 `formatOverdueIn`（"还欠"本身已是过去时，不再叠"（已过）"），
+  "今天/昨天/M月D日"的取词抽成 `dayName` 与 `formatDueIn` 共用；仍然按提醒自己的时区念。
+
+验证：shared 41、mobile 52 文件 343 用例（新增 `reminders/__tests__/card-label.test.ts` 7 条、
+`pages/__tests__/reminder-card-label-wiring.test.ts` 2 条），`vue-tsc --noEmit` 退出 0，
+api e2e 15 套 140 用例（新增 3 条：列表带出 overdueSince / 完成本次后清空 / 错过两次说最早那次）。
+RED 都是亲眼见过的：新模块先 "Failed to load url ../card-label"；e2e 三条先 `undefined`/`NaN`；
+gate 测试对改动前的页面源码两条断言都不成立（用 `git show HEAD:` 复核过）。
+
+H5 实证（分段口径自检家庭，每天 05:00）：待办画"每天 · 还欠 今天 05:00"；
+点"完成本次"后同一行立刻变成"每天 · 下次 明天 05:00"；一次性那条过期时念"还欠 今天 05:00"，
+点完从待办消失。用完的家庭已归档并删除，登记表与 currentFamilyId 已清。
+
+**顺带定了未决问题 #1**（见上文）：ACTIVE 与 OVERDUE 保持重叠，不改成互斥。
+
+**一条我自己猜错的**：以为"已完成"分栏里过期的一次性提醒会念成"未设定时间"。写完用例才发现
+`nextDue` 对 ONE_TIME 直接回原 `dueAt`（不看未来），屏幕上就是"今天 08:00（已过）"——事实没错。
+用例留下来锁住这个行为（`card-label.test.ts` 现在 8 条）。这正是"先验证再动手"要防的那类改动。
+
+**未决问题 #2 一并还掉**：归档孩子的 `events/latest` 400（读路径复用了写路径的校验）。
+`findChildInFamily`（读）与 `assertChildWritable`（写）分层，e2e 一条用例同时守住两侧。
+api e2e 因此 **15 套 141 用例**。
+
+> 踩坑补记：跑 api e2e 一定要带 `--runInBand`（`pnpm --filter @moonbud/api test:e2e` 已经有了）。
+> 每个 suite 的 `beforeEach` 都 TRUNCATE 同一个 `moonbud_test`，并行跑会让别的 suite 的
+> `beforeEach` 在测试中途把数据抽走——我这样误红过一轮（9 个 500）。
+
+### 2026-10-19（周一）深夜（四）：底部"提醒"格有了未读角标
+
+spec 阶段一第 2 条要的是"底部 Tab 显示未读红点"，此前只有"我的"页那一行有数字，
+tabBar 上什么都没有。补上：
+
+- `notifications/tab-badge.ts`：`REMINDER_TAB_INDEX = 2`、`applyUnreadBadge(count)`、
+  `refreshUnreadTabBadge()`。0 是摘角标而不是写"0"；超过 99 写 `99+`；
+  **`null`（读不到）什么都不动**——摘掉角标等于替用户宣布"没有要看的"，
+  而真相是离线/会话过期。`fetchUnreadCount()` 因此从 `Promise<number>`（失败给 0）
+  改成 `Promise<number | null>`，"我的"页那一行和角标共用同一次读取，两处不会念出两个数。
+- `refreshUnreadTabBadge()` 并入同一次 in-flight：冷启动 App.onShow 与落地页 onShow 挨着触发。
+- **接线位置是踩过来的**：只在 `App.vue` 的 onShow 里画，H5 冷启动**永远画不上**——
+  `App.onShow` 早于 tabBar 挂载，`uni.setTabBarBadge` 静默丢失。所以四个 Tab 页的 onShow
+  也各补一次（"我的"页用同一次读取的结果直接 `applyUnreadBadge(count)`），
+  登录/登出（`applySession` / `clearSession`）与提醒中心读完（单条标记、全部已读）跟着改。
+
+验证：mobile 54 文件 358 用例（`tab-badge.test.ts` 7 条 + `tab-badge-wiring.test.ts` 7 条），
+`vue-tsc` 退出 0。RED 见过的：`Failed to load url ../tab-badge`；并发那次 `expected 1 times, got 2`；
+Tab 页接线那条 `expected ... to contain 'refreshUnreadTabBadge()'`。
+
+H5 实证（"角标自检"家庭，账号 unread 现由服务端说了算）：冷启动落在首页时"提醒"格画 `9`
+（服务端 `unreadOnly` 的 total 也是 9）；提醒中心点"全部已读"后切回 Tab 页角标消失；
+分钟级 cron 为新到点的提醒发出 1 条通知后，落到 Tab 页角标又出现 `1`。用完的家庭已归档。
+
+**阶段一第 3 条当时仍欠着**："APP 打开时的应用内提醒（轮询 + `uni.showToast`/弹窗）"。
+现在回前台只做两件事——重排本地推送、刷新角标，屏幕上并不弹出"有 N 条到点了"。下一节补上。
+
+### 2026-10-20（周二）凌晨（五）：App 开着时也会说一声"到点了"
+
+- `notifications/due-watch.ts`：纯函数 `planDueWatch(items, seenIds)` + `dueWatchMessage(items)`，
+  外面套一层 60 秒轮询（`startDueWatch` / `stopDueWatch` / `resetDueWatch`）。
+  - 只认 `occurrenceId !== null`：入家申请、改密请求是"有空来看一眼"，不该在一分钟一次的
+    轮询里突然冒出来吓人。
+  - **`seenIds === null` 表示"第一次"，只记底不弹**：冷启动、换账号、离线之后重新读到都算
+    第一次。服务端已经攒了三条时一次性炸三张 toast 是骚扰，而那三条本来就由本地推送或角标说过了。
+  - 读失败（离线、会话过期）就当这轮没发生：既不弹，也不推进"已经见过"——把"没读到"当成
+    "没有到点的"是替用户下结论。
+  - `seen` 上限 200（FIFO），只放在模块内存里，不落 storage：落了就会把"关机期间攒的"再弹一遍，
+    而那一段本来是系统通知的活。
+- 接线：`App.vue` 的 onShow 是 `if (useAuthStore().isLoggedIn) startDueWatch()`，onHide `stopDueWatch()`。
+  **冷启动的 onShow 早于静默登录**，那时 `token` 还是 null；必须由 `onLaunch` 的
+  `bootstrap().then(startDueWatch)` 接手。否则那一趟没有会话的轮询会把"第一次只记底"的额度白白用掉，
+  真登录之后攒下的提醒就再也弹不出来了。登录走 `applySession`（登录页直接换 Tab 页，
+  不会再触发 App.onShow），登出与会话失效走 `clearSession`。
+
+验证：mobile 56 文件 375 用例（`due-watch.test.ts` 13 + `due-watch-wiring.test.ts` 4），`vue-tsc` 退出 0。
+RED 见过的：`Failed to load url ../due-watch`；接线那三条正则三条全灭；另有两条是我自己的测试写错
+（fixture 用 `??` 把 `occurrenceId: null` 吃回了默认值；单条文案被我记成 `1 条提醒到点`，实际是 `到点了：<标题>`）。
+
+H5 实证（QA 家庭"QA 轮询之家"，账号 `qa_due_watch`）：带着 2 条已存在的未读到点通知真实 reload
+→ 首趟轮询在 +6.7s，之后严格按 60 秒一次（`pageSize=20` 共 19 次），**期间 0 张 toast**——冷启动只记底；
++150 秒新建的那一条在 22:19:28 弹 `到点了：该换个尿不湿`；同一分钟到点的两条在 22:30:28 弹
+`2 条提醒到点`，19 趟轮询里 `showToast` 总共只被调用 1 次（不重复）。另外把标签页整夜开着约 7 小时
+（约 420 趟轮询），toast 计数没有增长。用完的家庭已归档，浏览器本地会话状态已清。
+
+**探测手段自己有个坑**：`uni.showToast` 在 H5 复用同一个 `.uni-toast` 元素，第二次起
+MutationObserver 的 `addedNodes` 里看不到它，别把"没记录到"当成"没弹"。要盯每一次调用就在
+`window.uni.showToast` 上打包装——属性查找发生在调用时，patch 有效。
+
+**阶段一（v1 必做）至此四条都有了实现**：调度、提醒中心 + Tab 红点、应用内到点提示、
+本地定时通知（`plus.push`，只有真机能验，仍属待真机验证）。
+
+### 2026-10-20（周二）（六）：记录页能按"记录人"筛了（spec §9 第三个筛项）
+
+**欠的是什么**：§9 要求记录列表能按 类型 / 孩子 / **记录人** 三个维度筛，前两项早就有，
+记录人前后端都缺——`QueryEventsDto` 没有 `createdBy`，客户端也只有类型和孩子两行。
+
+**后端**：`QueryEventsDto` 加可选 `createdBy`（`@IsUUID`），`EventsService.findAll` 的
+`where` 多一条按需展开。**有意不做"这个人是不是本家庭成员"的校验**：拿陌生 id 筛只会得到
+空列表，泄露不了任何东西；反过来若为此报错，就等于把"这个 userId 存不存在"说了出去。
+传的是 `userId` 而非 `memberId`——客户端手上的每条记录只带 `createdBy`（就是 userId），
+用它回筛不需要第二次查询。`events.e2e-spec.ts` 补一条"可以只看某一个人记的"：用真实第二
+成员各记一条，断言 `createdBy=<我>` 只剩我、`createdBy=<陌生 uuid>` 返回 200+`total:0`、
+`createdBy=not-a-uuid` 返回 400。
+
+**前端**：`events/list-filters.ts` 三个纯函数——`buildEventQuery` 把三个筛项拼成 query
+（**空串必须丢掉**：`http.buildUrl` 只跳 `undefined/null`，空串会真发出去被服务端 `@IsUUID`
+打回 400）；`recorderOptions` 只有 ≥2 名成员时才画这一行，单人家庭返回 `[]`，自己显示成
+"我"、其余取备注名回落昵称；`emptyListCopy` 按"有没有生效的筛项"分两套文案——筛完为空要说
+`这个筛选下还没有记录 / 当前筛的是：…`，不能对着一堆没筛出来的记录喊"还没有记录"（spec 反
+目标：别让家长以为记录丢了）。`event-list/index.vue` 用 `membersApi.list` 拉真实成员名册
+（不是"记录里恰好出现过的人"），换家庭时把 `recorderFilter` 复位，芯片行复用既有的居中滚动。
+
+验证：mobile 58 文件 **391** 用例（新增 `list-filters.test.ts` 11 + `event-list-recorder.test.ts`
+5 源闸），`vue-tsc` 退出 0；`events.e2e-spec.ts` **16/16**。RED 见过的：`Failed to load url
+../list-filters`、记录人源闸 5/5 全灭、后端多返回一个 `createdBy` id。H5 实证（QA 家庭
+"记录人之家"，妈妈/爷爷两名成员）：芯片行渲染 `全部 / 我 / 爷爷`（自己标"我"）；点"爷爷"
+→ 请求带 `createdBy=60b525f3…`、列表只剩爷爷那一条辅食；再加"喂奶"→ 请求三条件齐
+（`type=feeding&childId=…&createdBy=…`）、空状态文案 `当前筛的是：喂奶、小满、爷爷`；
+再建一个**单人家庭并加一个孩子**，确认成员<2 时记录人行整行消失（排除"只是没孩子才不画"）。
+用完的两名 QA 账号家庭、临时孩子、`.qa-recorder-setup.mjs`、浏览器本地会话状态已全部清掉。
+
+**一处不是本次引入的 e2e 脆弱点**：全量 `test:e2e` 里 `members.e2e-spec.ts` 整套挂在共享
+`register()` 上（`/api/auth/register` 返 500，报 `families_ownerId_fkey` /
+`refresh_tokens_userId_fkey` 外键违例），但**单独跑它 17/17 全绿**，且它在 `--runInBand` 里
+恰好排第一。判定为首个套件冷启动时独立 `resetDatabase` 客户端与 app 的 PrismaService 两路
+连接交叠的老问题，与本次改动无关（`events` 套件在全量里照样 PASS）。没动测试脚手架：改
+`resetDatabase`/`createTestApp` 的连接时序会牵动所有 e2e 文件，超出本任务范围。**下次要真
+修就从这个首套件竞态入手。**
+
 ### 踩过的坑，下次直接避开
 - **`apps/api` 的常驻服务是 `node apps/api/dist/main.js`，改 `src` 不会生效。**
   验证后端行为前先 `pnpm --filter @moonbud/api build` 再重启，否则会拿旧二进制下结论。
@@ -247,4 +398,6 @@ H5 实证：给"每天该称重量"排上 19/20/21 号 21:00 三行，归档掉�
   全在 `test/*.e2e-spec.ts`，别把它当回归门禁。
 - u-popup `mode="bottom"` 渲染的是 `.u-drawer-content.u-drawer-bottom`，底色来自
   `--u-bg-white`；只测 documentElement 上的变量会得出错误结论，要看弹层自己的计算样式。
+- **H5 里 `uni.showToast` 复用同一个 `.uni-toast` 元素**：用 MutationObserver 的 `addedNodes`
+  数 toast 会漏掉第二次及以后的每一次，看起来像"没弹"。要数调用次数就包装 `window.uni.showToast`。
 

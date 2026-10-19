@@ -2,6 +2,7 @@
 import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import { fetchUnreadCount } from '../../notifications/unread'
+import { applyUnreadBadge } from '../../notifications/tab-badge'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import ThemeSwitcher from '../../components/ThemeSwitcher.vue'
 import { useAuthStore } from '../../stores/auth'
@@ -11,7 +12,10 @@ import { pickerOptions, timezoneLabel, type TimezoneOption } from '../../utils/t
 const authStore = useAuthStore()
 const familyStore = useFamilyStore()
 
-const unread = ref(0)
+const unread = ref<number | null>(null)
+
+/** 这一行的数字与 tabBar 角标必须念同一个数，也念成同一个样子。 */
+const unreadLabel = computed(() => (unread.value === null ? '' : unread.value > 99 ? '99+' : String(unread.value)))
 
 const user = computed(() => authStore.user)
 const familyName = computed(() => familyStore.currentFamily?.name ?? '还没有家庭')
@@ -39,7 +43,10 @@ async function refreshUnread(): Promise<void> {
   // 走下面的守卫，这一页会把家庭名一直说成"还没有家庭"，说到你离开本页。
   if (authStore.status === 'loading') await authStore.bootstrap()
   if (!authStore.isLoggedIn) return
-  unread.value = await fetchUnreadCount()
+  // 一次读取喂两处：这一行的数字和 tabBar 角标各问一次会拿到两个"未读数"。
+  const count = await fetchUnreadCount()
+  unread.value = count
+  applyUnreadBadge(count)
   await familyStore.load()
 }
 
@@ -116,7 +123,7 @@ onPullDownRefresh(() => {
         <view class="row" @click="go('/pages/notification-center/index')">
           <view class="row__left">
             <text class="row__label">提醒中心</text>
-            <text v-if="unread" class="badge"><text class="badge__label">{{ unread }}</text></text>
+            <text v-if="unreadLabel" class="badge"><text class="badge__label">{{ unreadLabel }}</text></text>
           </view>
           <text class="row__chevron">›</text>
         </view>

@@ -119,6 +119,14 @@ export interface ReminderDto {
   status: ReminderStatus
   createdBy: string
   createdAt: string
+  /**
+   * 最早那条"已经到点还没做"的实例，没有则为 null。
+   *
+   * 只有读接口（列表 / 详情 / 完成本次）会填它：重复提醒的 `dueAt` 是 null，
+   * 客户端看得见周期却看不见哪一次已被家里人点掉，按周期回推会把"昨晚做过的"
+   * 也说成没过，于是待办只会说"下次 明天 08:00"，绝口不提今早那次没做。
+   */
+  overdueSince: string | null
 }
 
 export interface ReminderOccurrenceDto {

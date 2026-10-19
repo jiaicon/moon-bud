@@ -41,6 +41,7 @@ const recurring = (over: Partial<ReminderDto> = {}): ReminderDto => ({
   status: 'ACTIVE',
   createdBy: 'u1',
   createdAt: '2026-10-01T00:00:00.000Z',
+  overdueSince: null,
   ...over,
 })
 

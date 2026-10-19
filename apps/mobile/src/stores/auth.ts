@@ -4,6 +4,8 @@ import { ApiRequestError } from '../api/errors'
 import { renewAccessToken, setAccessToken, setRefreshHandler, setSessionExpiredHandler } from '../api/http'
 import { authApi, meApi } from '../api/endpoints'
 import { clearLocalNotifications } from '../notifications/local-notify'
+import { resetDueWatch, startDueWatch } from '../notifications/due-watch'
+import { applyUnreadBadge, refreshUnreadTabBadge } from '../notifications/tab-badge'
 import { clearPreviewVisited } from '../utils/preview-visited'
 
 const REFRESH_TOKEN_KEY = 'refreshToken'
@@ -168,12 +170,22 @@ export const useAuthStore = defineStore('auth', {
       this.mustChangePassword = res.mustChangePassword
       this.status = 'idle'
       this.clearError()
+      // 登录/注册是直接进 Tab 页的，不会再触发 App 的 onShow：角标不自己补这一下，
+      // 这一整趟会话头顶都是空的。
+      void refreshUnreadTabBadge()
+      // 前台轮询也一样要在这里接手：登录页是直接换到 Tab 页的，App 的 onShow 不会为它响。
+      startDueWatch()
     },
 
     clearSession() {
       setAccessToken(null)
       uni.setStorageSync(REFRESH_TOKEN_KEY, '')
       clearLocalNotifications()
+      // 会话没了就没有"未读"这回事，角标必须跟着摘掉。
+      applyUnreadBadge(0)
+      // 轮询跟着停：继续跑是在替上一个账号读通知，而"哪些已经弹过"那份进度
+      // 到了下一个账号身上，就会把人家真正该看到的提醒当成旧账吞掉。
+      resetDueWatch()
       this.token = null
       this.user = null
       this.mustChangePassword = false

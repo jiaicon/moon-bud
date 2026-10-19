@@ -7,7 +7,7 @@ import type { CreateReminderDto } from './dto/create-reminder.dto'
 import type { UpdateReminderDto } from './dto/update-reminder.dto'
 import type { QueryRemindersDto } from './dto/query-reminders.dto'
 
-function toReminderDto(reminder: Reminder): ReminderDto {
+function toReminderDto(reminder: Reminder, overdueSince: Date | null = null): ReminderDto {
   return {
     id: reminder.id,
     familyId: reminder.familyId,
@@ -22,6 +22,7 @@ function toReminderDto(reminder: Reminder): ReminderDto {
     status: reminder.status,
     createdBy: reminder.createdBy,
     createdAt: reminder.createdAt.toISOString(),
+    overdueSince: overdueSince?.toISOString() ?? null,
   }
 }
 
@@ -72,14 +73,21 @@ export class RemindersService {
       this.prisma.reminder.count({ where }),
     ])
 
-    return { items: items.map(toReminderDto), total, page, pageSize }
+    const overdue = await this.earliestOverdue(items.map((r) => r.id))
+    return {
+      items: items.map((r) => toReminderDto(r, overdue.get(r.id) ?? null)),
+      total,
+      page,
+      pageSize,
+    }
   }
 
   async detail(familyId: string, reminderId: string): Promise<ReminderDto> {
     const reminder = await this.findInFamily(familyId, reminderId)
     // 读的时候顺手补齐到期实例：客户端不必等下一次 cron 才能看到"今天这次"。
     await this.occurrences.materializeDue()
-    return toReminderDto(reminder)
+    const overdue = await this.earliestOverdue([reminderId])
+    return toReminderDto(reminder, overdue.get(reminderId) ?? null)
   }
 
   async update(
@@ -166,7 +174,10 @@ export class RemindersService {
       where: { id: target.id },
       data: { status: 'DONE', completedBy: userId, completedAt: now },
     })
-    return toReminderDto(reminder)
+    // 还欠着别的日子就说还欠着：这里回的是"做完这一次之后"最早那条没过的那次，
+    // 不是做完之前的那一条。
+    const overdue = await this.earliestOverdue([reminderId])
+    return toReminderDto(reminder, overdue.get(reminderId) ?? null)
   }
 
   /**
@@ -197,6 +208,27 @@ export class RemindersService {
       throw new NotFoundException('提醒不存在')
     }
     return reminder
+  }
+
+  /**
+   * 每条提醒"最早那条还没做的过期实例"，一次查完整页。
+   *
+   * 客户端自己算不出来：它看得见 rrule，看不见哪一次已经被家里人点掉，
+   * 按周期回推会把"昨晚做过的"也说成没过。而这是整页一次查询，不是每条一发。
+   */
+  private async earliestOverdue(reminderIds: string[]): Promise<Map<string, Date>> {
+    if (reminderIds.length === 0) return new Map()
+    const rows = await this.prisma.reminderOccurrence.findMany({
+      where: { reminderId: { in: reminderIds }, status: 'PENDING', dueAt: { lt: new Date() } },
+      orderBy: { dueAt: 'asc' },
+      select: { reminderId: true, dueAt: true },
+    })
+    const earliest = new Map<string, Date>()
+    for (const row of rows) {
+      // dueAt 升序，第一条就是最早的那次。
+      if (!earliest.has(row.reminderId)) earliest.set(row.reminderId, row.dueAt)
+    }
+    return earliest
   }
 
   private async assertChildInFamily(childId: string, familyId: string): Promise<void> {

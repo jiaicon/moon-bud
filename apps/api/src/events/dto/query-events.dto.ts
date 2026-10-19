@@ -21,6 +21,17 @@ export class QueryEventsDto {
   @IsIn(EVENT_TYPES as unknown as string[], { message: '未知的记录类型' })
   type?: EventType
 
+  /**
+   * 记录人。传的是 userId 而不是 memberId：客户端手上的记录里只有 `createdBy`
+   * （userId），拿它直接回筛才不需要第二次查询。
+   *
+   * 不校验"这个人是本家庭的成员吗"：筛出一个陌生 id 只会得到空列表，泄露不了
+   * 任何东西，而报错反而会把"这个 userId 存不存在"说出去。
+   */
+  @IsOptional()
+  @IsUUID()
+  createdBy?: string
+
   @IsOptional()
   @IsISO8601()
   from?: string

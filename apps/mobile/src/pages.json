@@ -115,6 +115,12 @@
 			}
 		},
 		{
+			"path": "pages/dup-window-settings/index",
+			"style": {
+				"navigationBarTitleText": "重复提醒提示"
+			}
+		},
+		{
 			"path": "pages/profile/index",
 			"style": {
 				"navigationBarTitleText": "我的",

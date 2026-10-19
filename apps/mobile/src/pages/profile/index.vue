@@ -85,6 +85,14 @@ onPullDownRefresh(() => {
       </view>
 
       <view class="section">
+        <text class="section__title">记录</text>
+        <view class="row" @click="go('/pages/dup-window-settings/index')">
+          <text class="row__label">重复提醒提示</text>
+          <text class="row__chevron">›</text>
+        </view>
+      </view>
+
+      <view class="section">
         <text class="section__title">家庭</text>
         <view class="row" @click="go('/pages/family-settings/index')">
           <text class="row__label">家庭设置</text>

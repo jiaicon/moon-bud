@@ -5,11 +5,14 @@ import { resyncActiveReminderSchedules } from './notifications/reminder-arming'
 import { resetDueWatch, startDueWatch, stopDueWatch } from './notifications/due-watch'
 import { refreshUnreadTabBadge } from './notifications/tab-badge'
 import { useAuthStore } from './stores/auth'
+import { useDupWindowStore } from './stores/dup-window'
 import { useThemeStore } from './stores/theme'
 
 onLaunch(() => {
   // 主题必须在第一帧之前落定，否则冷启动会闪一下默认色；纯本地读取，不发请求。
   useThemeStore().init()
+  // 防重复提示窗口同样是本地偏好：先恢复，第一张表单才知道该用哪一档窗口。
+  useDupWindowStore().init()
   // 本地通知的排期登记表按"改动时重建"维护；冷启动先按表重放一次，把 App 关着时
   // 已经过期的条目清掉，接下来的重算才不会被旧时刻污染。
   rearmLocalNotifications()

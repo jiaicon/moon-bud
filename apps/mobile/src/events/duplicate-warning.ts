@@ -45,6 +45,11 @@ export interface DuplicateWarningParams {
   type: EventType
   timezone: string
   now?: Date
+  /**
+   * 生效窗口（分钟）。由调用方从"设置"里解析后传入；不给就用该类型的内置默认。
+   * 放在参数上而不是让这里自取 store，是为了让纯函数保持可测、无副作用。
+   */
+  windowMinutes?: number
 }
 
 export function shouldWarnDuplicate({
@@ -52,6 +57,7 @@ export function shouldWarnDuplicate({
   type,
   timezone,
   now = new Date(),
+  windowMinutes,
 }: DuplicateWarningParams): { warn: boolean; message: string } {
   if (!latest) return { warn: false, message: '' }
 
@@ -62,7 +68,8 @@ export function shouldWarnDuplicate({
 
   const minutes = (now.getTime() - occurredAt) / 60_000
   const meta = EVENT_TYPE_META[type]
-  if (minutes >= meta.duplicateWindowMinutes) return { warn: false, message: '' }
+  const window = windowMinutes && windowMinutes > 0 ? windowMinutes : meta.duplicateWindowMinutes
+  if (minutes >= window) return { warn: false, message: '' }
 
   const who = latest.createdByNickname || '家人'
   return { warn: true, message: `${who} ${relativeTime(timezone, latest.occurredAt, now)}刚记过一次${meta.label}` }

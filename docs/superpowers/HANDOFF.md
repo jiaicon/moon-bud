@@ -388,6 +388,39 @@ MutationObserver 的 `addedNodes` 里看不到它，别把"没记录到"当成"�
 `resetDatabase`/`createTestApp` 的连接时序会牵动所有 e2e 文件，超出本任务范围。**下次要真
 修就从这个首套件竞态入手。**
 
+### 2026-10-20（周二）（七）：防重复提示的窗口能按类型调了（补上 §"可从设置调整"）
+
+**欠的是什么**：防重复照护的提示早就在（`shouldWarnDuplicate` 比"距上次同类型记录多久"），
+但 spec 那句"初始 N=90，**可从设置调整**"没实现——窗口写死在 `event-fields.ts` 的
+`duplicateWindowMinutes` 里，家长改不动。
+
+**这是纯客户端的活，落本地、不进后端**：提示完全由客户端算（查最近一条 + 比时间），没有
+一项别人会读到，为它加 `User` 字段/迁移/API 不值当；它与主题一样是"这台设备上的我有多敏感"。
+**所以它不随退出登录清除**（设备级偏好，不是会话状态），冷启动在 `App.onLaunch` 和主题一起
+`init()` 恢复。
+
+**做法**：`events/duplicate-window.ts` 放纯逻辑——`DEFAULT_WINDOW_MINUTES` 从类型元数据派生
+（别再抄一份数字）、`WINDOW_CHOICES=[30,45,60,90,120,180,240]`、`resolveWindowMinutes(type,
+overrides)`（非正数的脏覆盖按没设处理，回落默认）。`stores/dup-window.ts` 存 `overrides` 到
+本地（`DUP_WINDOW_STORAGE_KEY='dupWindowMinutes'`），`init` 读回时 `sanitize` 只认正数分钟。
+`shouldWarnDuplicate` 多收一个**可选 `windowMinutes`**（放参数上而不是让它自取 store，保住
+纯函数可测）；`event-form` 把 `dupWindowStore.windowFor(type)` 传进去。新页
+`pages/dup-window-settings/index`：每个类型一行 `picker`，第一项恒"默认"（撤覆盖），其余是
+候选分钟；"我的"页新开一节"记录"挂入口，路由进 `pages.json`。
+
+验证：mobile 61 文件 **408** 用例（新增 `duplicate-window.test.ts` 5 + `dup-window.test.ts` 5
++ `duplicate-warning` 加 2 + `dup-window-wiring.test.ts` 源闸 4），`vue-tsc` 退出 0。RED 见过的：
+`Failed to load url ../duplicate-window`、`../dup-window`、`dup-window-settings/index.vue` 读不到、
+两条 windowMinutes 用例。H5 实证：设置页 8 行按内置默认渲染（喂奶 90/睡眠 60/用药 120/体温 180…）；
+拨一个选项 → `dup.set` 真的写进 `dupWindowMinutes`（实测落 `{sleep:30}`）；同一条 53 分钟前的喂奶，
+把窗口调成 30 → 表单**不提示**，恢复默认 90 → 提示"妈妈 53 分钟前刚记过一次喂奶"。用完的 QA
+家庭已归档，浏览器会话与 `dupWindowMinutes` 已清。
+
+**H5 拨选择器的小坑**：页面上同时挂着 8 个 `uni-picker`，`querySelector('.uni-picker-item')`
+的"第一个"未必是刚点开的那个——我点 30 结果写到了 `sleep` 上。要精确验证某一行，直接
+`uni.setStorageSync('dupWindowMinutes', {feeding:30})` 再 reload（走的正是 `init` 读的那条路），
+比在轮子上猜索引稳。
+
 ### 踩过的坑，下次直接避开
 - **`apps/api` 的常驻服务是 `node apps/api/dist/main.js`，改 `src` 不会生效。**
   验证后端行为前先 `pnpm --filter @moonbud/api build` 再重启，否则会拿旧二进制下结论。

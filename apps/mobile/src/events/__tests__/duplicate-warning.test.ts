@@ -96,4 +96,24 @@ describe('shouldWarnDuplicate', () => {
       }).warn,
     ).toBe(true)
   })
+
+  it('显式 windowMinutes 覆盖内置默认：把喂奶窗口调大到 120 后，100 分钟前也提示', () => {
+    // 默认 90 分钟窗口下，100 分钟前不该提示。
+    expect(shouldWarnDuplicate({ latest: feeding(100), type: 'feeding', timezone: 'Asia/Shanghai' }).warn).toBe(false)
+    // 带上"设置"里调大的窗口就提示。
+    const r = shouldWarnDuplicate({
+      latest: feeding(100),
+      type: 'feeding',
+      timezone: 'Asia/Shanghai',
+      windowMinutes: 120,
+    })
+    expect(r.warn).toBe(true)
+    expect(r.message).toContain('喂奶')
+  })
+
+  it('显式 windowMinutes 调小：35 分钟前在 30 分钟窗口下不提示', () => {
+    expect(
+      shouldWarnDuplicate({ latest: feeding(35), type: 'feeding', timezone: 'Asia/Shanghai', windowMinutes: 30 }).warn,
+    ).toBe(false)
+  })
 })

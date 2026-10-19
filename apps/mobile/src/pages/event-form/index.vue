@@ -17,12 +17,14 @@ import { zhValidationMessage } from '../../events/validation-messages'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useChildStore } from '../../stores/child'
+import { useDupWindowStore } from '../../stores/dup-window'
 import { useFamilyStore } from '../../stores/family'
 import { isoFromWallTime, wallFields } from '../../utils/wall-time'
 
 const familyStore = useFamilyStore()
 const childStore = useChildStore()
 const authStore = useAuthStore()
+const dupWindowStore = useDupWindowStore()
 
 const type = ref<EventType | ''>('')
 const editingId = ref('')
@@ -97,7 +99,12 @@ async function loadDuplicateHint(next: EventType): Promise<void> {
   if (!familyId.value || !child.value) return
   try {
     const latest = await eventsApi.latest(familyId.value, child.value.id, next)
-    const hint = shouldWarnDuplicate({ latest: latest.event, type: next, timezone: timezone.value })
+    const hint = shouldWarnDuplicate({
+      latest: latest.event,
+      type: next,
+      timezone: timezone.value,
+      windowMinutes: dupWindowStore.windowFor(next),
+    })
     duplicateHint.value = hint.warn ? hint.message : ''
   } catch {
     duplicateHint.value = ''

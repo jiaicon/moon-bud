@@ -8,11 +8,14 @@ vi.mock('../../../api/endpoints', () => ({
   meApi: { get: vi.fn() },
 }))
 
-import { authApi } from '../../../api/endpoints'
+import { authApi, familiesApi, invitesApi } from '../../../api/endpoints'
 import { useAuthStore } from '../../../stores/auth'
+import { useFamilyStore } from '../../../stores/family'
 import { useLoginForm } from '../use-login-form'
 
 const login = authApi.login as unknown as ReturnType<typeof vi.fn>
+const register = authApi.register as unknown as ReturnType<typeof vi.fn>
+const accept = invitesApi.accept as unknown as ReturnType<typeof vi.fn>
 
 const session = {
   accessToken: 'at',
@@ -62,5 +65,28 @@ describe('useLoginForm.submit 的返回值', () => {
 
     await expect(form.submit()).resolves.toBe(false)
     expect(authApi.login).not.toHaveBeenCalled()
+  })
+
+  it('加入家庭成功后选中项就落到那个家庭，不靠"当前 id 失效才回退"', async () => {
+    // 手里已经选中着别的家庭的人加入新家庭后，若还停在旧家庭，他会以为自己没加进去。
+    uni.setStorageSync('currentFamilyId', 'f-old')
+    register.mockResolvedValue(session)
+    accept.mockResolvedValue({ id: 'f-new', name: '新家庭', ownerId: 'u9', role: 'MEMBER', archivedAt: null })
+    ;(familiesApi.list as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 'f-old', name: '旧家庭', ownerId: 'u1', role: 'OWNER', archivedAt: null },
+      { id: 'f-new', name: '新家庭', ownerId: 'u9', role: 'MEMBER', archivedAt: null },
+    ])
+
+    const form = useLoginForm()
+    form.mode.value = 'join'
+    form.form.username = 'mama2026'
+    form.form.password = 'pass12345'
+    form.form.nickname = '妈妈'
+    form.form.inviteCode = 'abcd2345'
+
+    await expect(form.submit()).resolves.toBe(true)
+    expect(accept).toHaveBeenCalledWith('ABCD2345')
+    expect(useFamilyStore().currentFamilyId).toBe('f-new')
+    expect(uni.getStorageSync('currentFamilyId')).toBe('f-new')
   })
 })

@@ -7,6 +7,9 @@ const storage = new Map<string, unknown>()
   removeStorageSync: (key: string) => void storage.delete(key),
   getSystemInfoSync: () => ({ theme: 'light' }),
   showModal: (opts: { success?: (res: { confirm: boolean }) => void }) => opts.success?.({ confirm: false }),
+  setNavigationBarColor: () => {},
+  setTabBarStyle: () => {},
+  showToast: () => {},
   request: () => {
     throw new Error('uni.request is not available in unit tests')
   },

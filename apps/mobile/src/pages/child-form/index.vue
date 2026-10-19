@@ -15,6 +15,7 @@ const GENDERS: { value: Gender; label: string }[] = [
   { value: 'UNKNOWN', label: '暂不填' },
 ]
 
+const childId = ref('')
 const name = ref('')
 const gender = ref<Gender>('UNKNOWN')
 const birthday = ref('')
@@ -22,6 +23,7 @@ const errors = ref<Record<string, string>>({})
 const saving = ref(false)
 
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
+const editing = computed(() => childId.value !== '')
 
 const today = new Date()
 /** 生日不可能在未来：把上限直接给到选择器，比让用户选了再报错好。 */
@@ -46,30 +48,38 @@ async function onSubmit(): Promise<void> {
   }
   if (!validate()) return
   saving.value = true
-  const child = await childStore.create(familyId.value, {
-    name: name.value.trim(),
-    gender: gender.value,
-    birthday: birthday.value,
-  })
+  const input = { name: name.value.trim(), gender: gender.value, birthday: birthday.value }
+  const ok = editing.value
+    ? await childStore.update(familyId.value, childId.value, input)
+    : (await childStore.create(familyId.value, input)) !== null
   saving.value = false
-  if (!child) {
-    uni.showToast({ title: childStore.error ?? '添加失败', icon: 'none' })
+  if (!ok) {
+    uni.showToast({ title: childStore.error ?? '保存失败', icon: 'none' })
     return
   }
-  uni.showToast({ title: '已添加', icon: 'none' })
+  uni.showToast({ title: editing.value ? '已更新' : '已添加', icon: 'none' })
   setTimeout(() => uni.navigateBack(), 600)
 }
 
-onLoad(async () => {
+onLoad(async (query) => {
   await familyStore.load()
   if (familyId.value) await childStore.load(familyId.value)
+  const id = String(query?.id ?? '')
+  if (!id || !familyId.value) return
+  const child = (childStore.childrenByFamily[familyId.value] ?? []).find((c) => c.id === id)
+  if (!child) return
+  // 没有 GET /children/:id，回填数据来自 store 里那一页列表。
+  childId.value = id
+  name.value = child.name
+  gender.value = child.gender
+  birthday.value = child.birthday
 })
 </script>
 
 <template>
   <theme-root>
     <view class="page">
-      <text class="page__title">添加孩子</text>
+      <text class="page__title">{{ editing ? '编辑孩子' : '添加孩子' }}</text>
       <text v-if="!familyId" class="page__hint">还没有家庭，先创建或加入一个。</text>
 
       <view class="field">

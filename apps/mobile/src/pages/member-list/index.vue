@@ -111,14 +111,40 @@ function closeTemp(): void {
   tempPassword.value = ''
 }
 
+/**
+ * 转让是唯一会改变"我是谁"的管理操作：成功后我自己降为管理员，
+ * 所以要用 store 重拉的家庭角色刷新页面，而不是就地猜。
+ */
+async function transfer(member: MemberDto): Promise<void> {
+  const name = member.displayName || member.nickname || member.username || '这位成员'
+  const go = await confirmDanger({
+    title: `把家庭交给「${name}」？`,
+    content: '交接后 TA 成为创建者，能邀请和移出家人、归档家庭；你变成普通管理员 —— 还能管理成员，但不能再转让或归档。这一步没有撤回入口。',
+    confirmText: '转让',
+  })
+  if (!go) return
+  const ok = await familyStore.transfer(familyId.value, member.userId)
+  if (!ok) {
+    uni.showToast({ title: familyStore.error ?? '转让失败', icon: 'none' })
+    return
+  }
+  target.value = null
+  uni.showToast({ title: '已转让创建者', icon: 'none' })
+  await load()
+}
+
 const goInvites = () => uni.navigateTo({ url: '/pages/invite-qrcode/index' })
 const goFamilySettings = () => uni.navigateTo({ url: '/pages/family-settings/index' })
 
+let ready = false
 onLoad(async () => {
   await familyStore.load()
   await load()
+  ready = true
 })
-onShow(() => void load())
+onShow(() => {
+  if (ready) void load()
+})
 </script>
 
 <template>
@@ -161,6 +187,9 @@ onShow(() => void load())
             </view>
             <view v-if="!isSelf(target)" class="sheet__action sheet__action--danger" @click="remove(target)">
               <text class="sheet__action-label">移出家庭</text>
+            </view>
+            <view v-if="isOwner" class="sheet__action sheet__action--transfer" @click="transfer(target)">
+              <text class="sheet__action-label">转让创建者</text>
             </view>
           </template>
           <text v-else-if="!canManage" class="sheet__hint">只有管理员能调整成员</text>
@@ -296,6 +325,10 @@ onShow(() => void load())
 
 .sheet__action--danger .sheet__action-label {
   color: var(--mb-color-error);
+}
+
+.sheet__action--transfer .sheet__action-label {
+  color: var(--mb-color-warning);
 }
 
 .sheet__action--ghost {

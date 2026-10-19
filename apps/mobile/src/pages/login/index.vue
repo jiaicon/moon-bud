@@ -3,6 +3,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { computed } from 'vue'
 import PasswordField from '../../components/PasswordField.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
+import { normalizeInviteCode } from '../../invite/landing-url'
 import { useAuthStore } from '../../stores/auth'
 import { useFamilyStore } from '../../stores/family'
 import { useLoginForm, type LoginMode } from './use-login-form'
@@ -27,6 +28,12 @@ const toast = (title: string) => uni.showToast({ title, icon: 'none' })
 onLoad((query) => {
   const requested = String(query?.mode ?? '')
   if (requested === 'register' || requested === 'join') mode.value = requested
+  // 扫码进来时邀请码已经在 URL 里了，再让人敲一遍是把简单事做难。
+  const code = normalizeInviteCode(String(query?.code ?? ''))
+  if (code) {
+    form.inviteCode = code
+    mode.value = 'join'
+  }
 })
 
 function switchMode(next: LoginMode) {

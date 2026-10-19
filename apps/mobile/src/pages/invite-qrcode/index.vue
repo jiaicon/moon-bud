@@ -5,6 +5,7 @@ import { computed, ref } from 'vue'
 import { invitesApi } from '../../api/endpoints'
 import { INVITE_LANDING_BASE_URL } from '../../config/env'
 import ThemeRoot from '../../components/ThemeRoot.vue'
+import { joinPageUrl } from '../../invite/landing-url'
 import { useFamilyStore } from '../../stores/family'
 import type { FamilyRole, InviteDto, InviteRole } from '@moonbud/shared'
 
@@ -26,14 +27,17 @@ const error = ref<string | null>(null)
 const active = ref<InviteDto | null>(null)
 
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
-const landingUrl = computed(() => {
-  if (!active.value || !INVITE_LANDING_BASE_URL) return ''
-  return `${INVITE_LANDING_BASE_URL}/join?code=${active.value.code}`
+const landingUrl = computed(() => joinPageUrl(INVITE_LANDING_BASE_URL, active.value?.code ?? ''))
+/** 发码/撤销后端只认 OWNER/ADMIN（列表任何成员都能看），普通成员来了只给看不给点。 */
+const canManage = computed(() => {
+  const role = familyStore.currentFamily?.role
+  return role === 'OWNER' || role === 'ADMIN'
 })
 
 /**
- * 二维码必须用主题色画：写死黑白会让这张卡在暗色主题里刺眼，
- * 而"这一块没跟着变"正是 Task 8 第 6 步要抓的残留色。
+ * 二维码跟着主题画是错的：深色模式里它是浅码深底，微信的解码器对这种反色码
+ * 时灵时不灵，而"扫不出来"在家人那边等于这个功能没有。所以这一块固定黑码白底，
+ * 卡片其余部分（标题、邀请码、说明）仍跟着主题。
  * 用 create() 拿模块矩阵自己铺 view，避免 qrcode 的 canvas 路径（APP 端没有 canvas）。
  */
 const matrix = computed(() => {
@@ -123,23 +127,26 @@ onLoad(async () => {
       </view>
 
       <template v-else>
-        <view class="field">
-          <text class="field__label">加入后的身份</text>
-          <view class="chip-row">
-            <view v-for="r in ROLES" :key="r.value" class="chip" :class="{ 'chip--active': role === r.value }" @click="role = r.value">
-              <text class="chip__label">{{ r.label }}</text>
+        <template v-if="canManage">
+          <view class="field">
+            <text class="field__label">加入后的身份</text>
+            <view class="chip-row">
+              <view v-for="r in ROLES" :key="r.value" class="chip" :class="{ 'chip--active': role === r.value }" @click="role = r.value">
+                <text class="chip__label">{{ r.label }}</text>
+              </view>
             </view>
           </view>
-        </view>
 
-        <view class="field">
-          <text class="field__label">有效小时数</text>
-          <input v-model="hours" class="field__input" type="digit" placeholder="默认 72 小时" />
-        </view>
+          <view class="field">
+            <text class="field__label">有效小时数</text>
+            <input v-model="hours" class="field__input" type="digit" placeholder="默认 72 小时" />
+          </view>
 
-        <view class="btn" :class="{ 'btn--disabled': busy }" @click="create">
-          <text class="btn__label">{{ busy ? '生成中…' : '生成邀请码' }}</text>
-        </view>
+          <view class="btn" :class="{ 'btn--disabled': busy }" @click="create">
+            <text class="btn__label">{{ busy ? '生成中…' : '生成邀请码' }}</text>
+          </view>
+        </template>
+        <text v-else class="page__readonly-hint">只有管理员能生成或撤销邀请码。下面的码可以看、可以扫。</text>
 
         <text v-if="error" class="page__error">{{ error }}</text>
 
@@ -173,7 +180,7 @@ onLoad(async () => {
               <text class="row__code">{{ invite.code }}</text>
               <text class="row__meta">{{ ROLE_LABEL[invite.role] }} · {{ remaining(invite) }}</text>
             </view>
-            <view v-if="!invite.revokedAt" class="row__revoke" @click.stop="revoke(invite)">
+            <view v-if="canManage && !invite.revokedAt" class="row__revoke" @click.stop="revoke(invite)">
               <text class="row__revoke-label">撤销</text>
             </view>
           </view>
@@ -246,6 +253,11 @@ onLoad(async () => {
   color: var(--mb-color-error);
 }
 
+.page__readonly-hint {
+  font-size: 24rpx;
+  color: var(--mb-color-text-secondary);
+}
+
 .code-card {
   display: flex;
   flex-direction: column;
@@ -278,7 +290,9 @@ onLoad(async () => {
   flex-direction: column;
   padding: 16rpx;
   border-radius: 12rpx;
-  background-color: var(--mb-color-surface);
+  border: 1rpx solid var(--mb-color-border);
+  /* 这一块是整套主题里唯一不许跟着变色的地方，见 matrix 上方的注释 */
+  background-color: #ffffff;
 }
 
 .qr__row {
@@ -292,11 +306,11 @@ onLoad(async () => {
 }
 
 .qr__cell--dark {
-  background-color: var(--mb-color-text-primary);
+  background-color: #000000;
 }
 
 .qr__cell--light {
-  background-color: var(--mb-color-surface);
+  background-color: #ffffff;
 }
 
 .qr-fallback {

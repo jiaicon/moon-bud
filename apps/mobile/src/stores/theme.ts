@@ -1,9 +1,13 @@
 import { defineStore } from 'pinia'
 import type { ThemeMode, ThemePresetId } from '@moonbud/shared'
-import { THEME_MODE_STORAGE_KEY, THEME_STORAGE_KEY, applyTheme, resolveDark } from '../theme/apply-theme'
+import { applyTheme, resolveDark, THEME_MODE_STORAGE_KEY, THEME_STORAGE_KEY } from '../theme/apply-theme'
 import { THEME_PRESETS } from '../theme/presets'
+import { watchSystemTheme } from '../theme/system-theme'
 
 const DEFAULT_PRESET: ThemePresetId = 'mist-blue'
+
+// 监听是全局的，跟着模块走而不是 store 实例：store 被重建时不该再挂一层。
+let stopSystemWatch: (() => void) | null = null
 
 function systemDark(): boolean {
   try {
@@ -38,6 +42,17 @@ export const useThemeStore = defineStore('theme', {
       }
       this.systemDark = systemDark()
       applyTheme(this.presetId, resolveDark(this.mode, this.systemDark), this.mode)
+      this.watchSystemTheme()
+    },
+
+    /** 只有 auto 模式才该跟着系统走；手动选 light/dark 时监听照常挂着但什么都不做。 */
+    watchSystemTheme(): void {
+      if (stopSystemWatch) return
+      stopSystemWatch = watchSystemTheme((dark) => {
+        this.systemDark = dark
+        if (this.mode !== 'auto') return
+        applyTheme(this.presetId, dark, this.mode)
+      })
     },
 
     setPreset(presetId: ThemePresetId): void {

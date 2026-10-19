@@ -43,6 +43,14 @@ describe('auth store', () => {
     expect(uni.getStorageSync('refreshToken')).toBe(rt)
   })
 
+  it('会话一建立就清掉"看过预览"的标记：注册过的人不该再被当游客催注册', async () => {
+    uni.setStorageSync('previewVisited', '1')
+    ;(authApi.login as ReturnType<typeof vi.fn>).mockResolvedValue(loginResult)
+    const store = useAuthStore()
+    await store.login('mama2024', 'pass12345')
+    expect(uni.getStorageSync('previewVisited')).toBe('')
+  })
+
   it('登出清空全部本地会话状态', async () => {
     ;(authApi.login as ReturnType<typeof vi.fn>).mockResolvedValue(loginResult)
     const store = useAuthStore()

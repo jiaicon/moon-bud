@@ -5,10 +5,10 @@ import ThemeRoot from '../../components/ThemeRoot.vue'
 import ThemeSwitcher from '../../components/ThemeSwitcher.vue'
 import { EVENT_TYPE_META } from '../../events/event-fields'
 import { formatEventLine } from '../../events/format-event'
-import { MOCK_CHILD, MOCK_EVENTS, MOCK_FAMILY, MOCK_REMINDERS, PREVIEW_SCREENS } from '../../preview/mock-data'
+import { PREVIEW_SCREENS, MOCK_CHILD, MOCK_EVENTS, MOCK_FAMILY, MOCK_REMINDERS } from '../../preview/mock-data'
+import { markPreviewVisited } from '../../utils/preview-visited'
 
-const PREVIEW_VISITED_FLAG = 'previewVisited'
-uni.setStorageSync(PREVIEW_VISITED_FLAG, '1')
+markPreviewVisited()
 
 const clock = (iso: string): string => {
   const d = new Date(iso)

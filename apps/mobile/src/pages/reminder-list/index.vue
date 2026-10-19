@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onLoad, onShow } from '@dcloudio/uni-app'
+import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import { computeDueAt, type MemberDto, type ReminderDto, type ReminderListFilter } from '@moonbud/shared'
 import { membersApi, remindersApi } from '../../api/endpoints'
 import { cancelLocalNotification, scheduleLocalNotification } from '../../notifications/local-notify'
+import { formatDueIn } from '../../reminders/due-label'
 import EmptyState from '../../components/EmptyState.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useFamilyStore } from '../../stores/family'
@@ -54,8 +55,8 @@ function nextDue(reminder: ReminderDto): Date | null {
 
 function dueLabel(reminder: ReminderDto): string {
   const next = nextDue(reminder)
-  if (reminder.type === 'ONE_TIME') return next ? fmtTime(next) : '未设定时间'
-  const time = next ? fmtTime(next) : '待调度'
+  if (reminder.type === 'ONE_TIME') return next ? formatDueIn(reminder.timezone, next) : '未设定时间'
+  const time = next ? formatDueIn(reminder.timezone, next) : '待调度'
   return `${RRULE_HINT(reminder.rrule)} · 下次 ${time}`
 }
 
@@ -70,18 +71,6 @@ const RRULE_HINT = (rrule: string | null): string => {
 function intervalOf(rrule: string): string {
   const m = /INTERVAL=(\d+)/.exec(rrule)
   return m ? m[1] : '?'
-}
-
-function fmtTime(d: Date): string {
-  if (Number.isNaN(d.getTime())) return '待定'
-  const p = (n: number) => String(n).padStart(2, '0')
-  const now = new Date()
-  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
-  const time = `${p(d.getHours())}:${p(d.getMinutes())}`
-  if (sameDay) return `今天 ${time}`
-  const tomorrow = new Date(now.getTime() + 86_400_000)
-  if (d.getFullYear() === tomorrow.getFullYear() && d.getMonth() === tomorrow.getMonth() && d.getDate() === tomorrow.getDate()) return `明天 ${time}`
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${time}`
 }
 
 async function load(): Promise<void> {
@@ -136,9 +125,13 @@ const goCreate = () => uni.navigateTo({ url: '/pages/reminder-form/index' })
 const goFamily = () => uni.navigateTo({ url: '/pages/family-select/index' })
 const goNotifications = () => uni.navigateTo({ url: '/pages/notification-center/index' })
 
+// onLoad 已经拉过；onShow 只代表"从别处回到本页"。两边都拉会让首屏发双份请求。
+let ready = false
+
 onLoad(async () => {
   await familyStore.load()
   await load()
+  ready = true
 })
 
 onShow(() => {
@@ -147,7 +140,11 @@ onShow(() => {
     uni.removeStorageSync('reminderTabFocus')
     tabIndex.value = 0
   }
-  void load()
+  if (ready) void load()
+})
+
+onPullDownRefresh(() => {
+  void load().finally(() => uni.stopPullDownRefresh())
 })
 </script>
 

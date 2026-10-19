@@ -73,6 +73,18 @@ export const useFamilyStore = defineStore('family', {
       }
     },
 
+    /** 转让后自己的角色从 OWNER 变 ADMIN，本地那份 role 已经过时，只能重拉。 */
+    async transfer(familyId: string, toUserId: string): Promise<boolean> {
+      try {
+        await familiesApi.transfer(familyId, toUserId)
+        await this.load()
+        return true
+      } catch (err) {
+        this.error = err instanceof Error ? err.message : '转让所有权失败'
+        return false
+      }
+    },
+
     async archive(familyId: string): Promise<boolean> {
       try {
         await familiesApi.archive(familyId)

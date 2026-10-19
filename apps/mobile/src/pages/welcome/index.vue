@@ -2,13 +2,12 @@
 import { ref } from 'vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import ThemeSwitcher from '../../components/ThemeSwitcher.vue'
-
-const REGISTERED_FLAG = 'previewVisited'
+import { hasPreviewVisited } from '../../utils/preview-visited'
 
 const registerLabel = ref('开始使用')
 
 // 游客看过预览却没注册就离开，下次启动应当被引导回"完成注册"，而不是从头再挑一遍配色。
-if (uni.getStorageSync(REGISTERED_FLAG)) {
+if (hasPreviewVisited()) {
   registerLabel.value = '继续注册'
 }
 
@@ -19,7 +18,7 @@ const go = (url: string) => uni.navigateTo({ url })
   <theme-root>
     <view class="welcome">
       <view class="welcome__hero">
-        <text class="welcome__name">moonBud</text>
+        <text class="welcome__name">月芽</text>
         <text class="welcome__slogan">一家人一起记，孩子的一天看得见</text>
       </view>
 

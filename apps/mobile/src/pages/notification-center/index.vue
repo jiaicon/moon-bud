@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onLoad, onShow } from '@dcloudio/uni-app'
+import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import { notificationsApi } from '../../api/endpoints'
 import ThemeRoot from '../../components/ThemeRoot.vue'
@@ -82,8 +82,19 @@ function fmt(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-onLoad(() => void load(true))
-onShow(() => void load(true))
+// onLoad 已经拉过，onShow 只管"从别处回到本页"，否则首屏发双份请求。
+let ready = false
+
+onLoad(async () => {
+  await load(true)
+  ready = true
+})
+onShow(() => {
+  if (ready) void load(true)
+})
+onPullDownRefresh(() => {
+  void load(true).finally(() => uni.stopPullDownRefresh())
+})
 </script>
 
 <template>

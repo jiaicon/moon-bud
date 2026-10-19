@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import type { UserDto } from '@moonbud/shared'
 import { renewAccessToken, setAccessToken, setRefreshHandler } from '../api/http'
 import { authApi, meApi } from '../api/endpoints'
+import { clearPreviewVisited } from '../utils/preview-visited'
 
 const REFRESH_TOKEN_KEY = 'refreshToken'
 
@@ -120,6 +121,9 @@ export const useAuthStore = defineStore('auth', {
     applySession(res: { accessToken: string; refreshToken: string; user: UserDto; mustChangePassword: boolean }) {
       setAccessToken(res.accessToken)
       uni.setStorageSync(REFRESH_TOKEN_KEY, res.refreshToken)
+      // 会话一建立，"看过预览"这个游客标记就该作废：不然注册过的人每次冷启动
+      // 都被欢迎页当成没注册完，按钮一直写着"继续注册"。
+      clearPreviewVisited()
       this.token = res.accessToken
       this.user = res.user
       this.mustChangePassword = res.mustChangePassword

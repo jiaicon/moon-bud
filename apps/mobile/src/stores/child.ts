@@ -52,6 +52,24 @@ export const useChildStore = defineStore('child', {
       }
     },
 
+    async update(
+      familyId: string,
+      childId: string,
+      input: { name?: string; gender?: ChildDto['gender']; birthday?: string; avatarUrl?: string | null },
+    ): Promise<boolean> {
+      try {
+        const updated = await childrenApi.update(familyId, childId, input)
+        this.childrenByFamily = {
+          ...this.childrenByFamily,
+          [familyId]: (this.childrenByFamily[familyId] ?? []).map((c) => (c.id === childId ? updated : c)),
+        }
+        return true
+      } catch (err) {
+        this.error = err instanceof Error ? err.message : '修改孩子失败'
+        return false
+      }
+    },
+
     async remove(familyId: string, childId: string): Promise<boolean> {
       try {
         await childrenApi.remove(familyId, childId)
@@ -59,7 +77,13 @@ export const useChildStore = defineStore('child', {
           ...this.childrenByFamily,
           [familyId]: (this.childrenByFamily[familyId] ?? []).filter((c) => c.id !== childId),
         }
-        if (this.currentChildIdByFamily[familyId] === childId) this.select(familyId, '')
+        if (this.currentChildIdByFamily[familyId] === childId) {
+          // select(familyId,'') 会被"这个 id 不在列表里"挡掉，旧标记会留在盘上。
+          const next = { ...this.currentChildIdByFamily }
+          delete next[familyId]
+          this.currentChildIdByFamily = next
+          uni.setStorageSync(CURRENT_CHILD_KEYS, this.currentChildIdByFamily)
+        }
         return true
       } catch (err) {
         this.error = err instanceof Error ? err.message : '移除孩子失败'

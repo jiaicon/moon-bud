@@ -55,3 +55,12 @@ export function cancelLocalNotification(id: string): void {
   delete scheduled[id]
   rescheduleAll(scheduled)
 }
+
+/**
+ * 冷启动重建一次：登记表里已经过期的条目会被丢掉（rescheduleAll 跳过 at<=now），
+ * 还没到的重新排上。不这么做，App 关着的时候攒下的过期条目会一直留在表里，
+ * 而下一次任何改动都会把它们和真实排期一起重放。
+ */
+export function rearmLocalNotifications(): void {
+  rescheduleAll(readScheduled())
+}

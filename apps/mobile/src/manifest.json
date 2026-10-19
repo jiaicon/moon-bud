@@ -1,5 +1,5 @@
 {
-    "name" : "moonBud",
+    "name" : "月芽",
     // 占位符：云打包会直接拒绝这个值。必须换成自己在 DCloud 开发者中心申请的 appid（见 BUILD.md）。
     "appid" : "__UNI__MOONBUD",
     "description" : "一家人一起记，孩子的一天看得见",

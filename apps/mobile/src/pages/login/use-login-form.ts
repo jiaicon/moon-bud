@@ -1,6 +1,7 @@
 import { isSupportedTimezone, isValidUsername, normalizeUsername, PASSWORD_MIN_LENGTH } from '@moonbud/shared'
 import { reactive, ref } from 'vue'
 import { invitesApi } from '../../api/endpoints'
+import { normalizeInviteCode } from '../../invite/landing-url'
 import { useAuthStore } from '../../stores/auth'
 import { useFamilyStore } from '../../stores/family'
 
@@ -110,8 +111,11 @@ export function useLoginForm() {
       if (!ok || mode.value !== 'join') return ok
 
       try {
-        await invitesApi.accept(form.inviteCode.trim().toUpperCase())
+        const family = await invitesApi.accept(normalizeInviteCode(form.inviteCode))
         await familyStore.load()
+        // 已经选中着别的家庭的人加入新家庭后必须切过去，否则他停在旧家庭里，
+        // 以为"加入"没生效。
+        familyStore.switchFamily(family.id)
       } catch (err) {
         // 账号已经建好了，只有"加入家庭"这一步失败：单独提示，别让用户以为注册白做。
         errors.value.accept = err instanceof Error ? err.message : '加入家庭失败，请检查邀请码'

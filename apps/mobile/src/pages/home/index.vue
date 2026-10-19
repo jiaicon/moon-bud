@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { onLoad, onShow } from '@dcloudio/uni-app'
+import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { EVENT_TYPES, type EventDto, type ReminderDto } from '@moonbud/shared'
 import ChildSwitcher from '../../components/ChildSwitcher.vue'
 import FamilySwitcher from '../../components/FamilySwitcher.vue'
@@ -89,6 +89,10 @@ onLoad(async () => {
 onShow(() => {
   guardForcedChange()
   void refresh()
+})
+
+onPullDownRefresh(() => {
+  void refresh().finally(() => uni.stopPullDownRefresh())
 })
 
 const goReminders = () => uni.switchTab({ url: '/pages/reminder-list/index' })

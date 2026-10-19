@@ -4,11 +4,12 @@ import { onLoad } from '@dcloudio/uni-app'
 import { computeDueAt, NOTE_MAX_LENGTH, type MemberDto } from '@moonbud/shared'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { membersApi, remindersApi } from '../../api/endpoints'
-import { scheduleLocalNotification } from '../../notifications/local-notify'
+import { cancelLocalNotification, scheduleLocalNotification } from '../../notifications/local-notify'
 import { buildRruleFromUi, parseRruleForUi, RRULE_PRESETS, type RruleKind } from '../../reminders/rrule-presets'
 import { useAuthStore } from '../../stores/auth'
 import { useChildStore } from '../../stores/child'
 import { useFamilyStore } from '../../stores/family'
+import { confirmDanger } from '../../utils/confirm'
 
 const authStore = useAuthStore()
 const familyStore = useFamilyStore()
@@ -137,6 +138,32 @@ function whoLabel(assignee: string | null): string {
   if (!assignee) return '全家'
   const member = members.value.find((m) => m.userId === assignee)
   return member?.displayName || member?.nickname || '家人'
+}
+
+/**
+ * 停掉 = status CANCELLED，后端同时把未发生的 occurrence 标成 SKIPPED。
+ * 三个筛选栏（待办/已过期/已完成）都不含 CANCELLED，所以它从列表里彻底消失 ——
+ * 确认框里必须把这件事说清楚，不然人会以为它只是暂时静音。
+ */
+async function cancelReminder(): Promise<void> {
+  if (!reminderId.value || !familyId.value || saving.value) return
+  const go = await confirmDanger({
+    title: `停掉「${title.value.trim() || '这个提醒'}」？`,
+    content: '停掉后它不会再提醒你，也不会再出现在提醒列表的任何一栏里。已经记下的内容不受影响；想再提醒只能重新建一个。',
+    confirmText: '停掉提醒',
+  })
+  if (!go) return
+  saving.value = true
+  try {
+    await remindersApi.cancel(familyId.value, reminderId.value)
+    cancelLocalNotification(reminderId.value)
+    uni.showToast({ title: '已停掉提醒', icon: 'none' })
+    setTimeout(() => uni.navigateBack(), 600)
+  } catch (err) {
+    uni.showToast({ title: err instanceof Error ? err.message : '停掉失败', icon: 'none' })
+  } finally {
+    saving.value = false
+  }
 }
 
 onLoad(async (query) => {
@@ -288,6 +315,10 @@ const goBack = () => uni.navigateBack()
         <view class="btn" :class="{ 'btn--disabled': saving }" @click="onSubmit"><text class="btn__label">保存</text></view>
         <view class="btn btn--ghost" @click="goBack"><text class="btn__label">取消</text></view>
       </view>
+
+      <view v-if="reminderId" class="cancel-link" :class="{ 'btn--disabled': saving }" @click="cancelReminder">
+        <text class="cancel-link__label">停掉这个提醒</text>
+      </view>
     </view>
   </theme-root>
 </template>
@@ -408,6 +439,18 @@ const goBack = () => uni.navigateBack()
 
 .btn--disabled {
   opacity: 0.5;
+}
+
+.cancel-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 72rpx;
+}
+
+.cancel-link__label {
+  font-size: 26rpx;
+  color: var(--mb-color-error);
 }
 
 .btn__label {

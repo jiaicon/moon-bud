@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onLoad, onShow } from '@dcloudio/uni-app'
+import { onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import { familiesApi } from '../../api/endpoints'
 import ThemeRoot from '../../components/ThemeRoot.vue'
@@ -26,13 +26,19 @@ const sheetOpen = computed({
 })
 const family = computed(() => familyStore.currentFamily)
 const isOwner = computed(() => family.value?.role === 'OWNER')
+/** 改名后端只认 OWNER/ADMIN，归档只认 OWNER：给点不动的人留按钮比不显示更糟。 */
+const canManage = computed(() => isOwner.value || family.value?.role === 'ADMIN')
 const children = computed(() => childStore.childrenByFamily[familyId.value] ?? [])
+const leaveHint = computed(() =>
+  isOwner.value
+    ? '你是这个家庭的所有者：先在成员管理里把所有权转让给家人，否则退出会被拒绝 —— 家庭不能没人能管。退出后你的记录仍留在家庭里。'
+    : '退出后你再也打不开它的记录，也找不到回来的入口 —— 要再看需要家人重新邀请。记录本身留在家庭里。',
+)
 
 async function load(): Promise<void> {
-  if (!familyId.value) return
   await familyStore.load()
   name.value = family.value?.name ?? ''
-  await childStore.load(familyId.value)
+  if (familyId.value) await childStore.load(familyId.value)
 }
 
 async function rename(): Promise<void> {
@@ -77,8 +83,28 @@ async function archive(): Promise<void> {
   }
 }
 
-async function removeChild(child: ChildDto): Promise<void> {
+/**
+ * 退出是硬删成员关系（后端在同一个事务里检查"还剩一名 OWNER"），
+ * 所以失败原因来自后端：最后一名所有者会被拒绝，文案照实显示。
+ */
+async function leave(): Promise<void> {
+  if (!familyId.value) return
   const go = await confirmDanger({
+    title: `退出「${family.value?.name ?? '这个家庭'}」？`,
+    content: '退出后你再也打不开它的记录，也没有自行回来的入口 —— 需要家人重新邀请。家庭里的记录不会因此消失。',
+    confirmText: '退出',
+  })
+  if (!go) return
+  const ok = await familyStore.leave(familyId.value)
+  if (ok) {
+    uni.showToast({ title: '已退出', icon: 'none' })
+    uni.switchTab({ url: '/pages/home/index' })
+  } else {
+    error.value = familyStore.error ?? '退出失败'
+  }
+}
+
+async function removeChild(child: ChildDto): Promise<void> {  const go = await confirmDanger({
     title: `移除「${child.name}」？`,
     content: '记录不会删除，但这个孩子的历史会从全家的时间线里消失，当前版本没有找回入口。请先确认孩子不是被记错了名字。',
     confirmText: '移除',
@@ -95,12 +121,13 @@ async function removeChild(child: ChildDto): Promise<void> {
 const goMembers = () => uni.navigateTo({ url: '/pages/member-list/index' })
 const goInvites = () => uni.navigateTo({ url: '/pages/invite-qrcode/index' })
 const goAddChild = () => uni.navigateTo({ url: '/pages/child-form/index' })
+const editChild = (child: ChildDto) => {
+  childTarget.value = null
+  uni.navigateTo({ url: `/pages/child-form/index?id=${child.id}` })
+}
 const goSwitchFamily = () => uni.navigateTo({ url: '/pages/family-select/index' })
 
-onLoad(async () => {
-  await familyStore.load()
-  name.value = family.value?.name ?? ''
-})
+// 首次进入也会先 onLoad 再 onShow，所以数据只在 onShow 拉一次。
 onShow(() => void load())
 </script>
 
@@ -113,13 +140,18 @@ onShow(() => void load())
       </view>
 
       <template v-else>
-        <view class="field">
+        <view v-if="canManage" class="field">
           <text class="field__label">家庭名称</text>
           <input v-model="name" class="field__input" maxlength="30" placeholder="如：小月一家" />
           <text v-if="error" class="field__error">{{ error }}</text>
           <view class="btn btn--sm" :class="{ 'btn--disabled': saving }" @click="rename">
             <text class="btn__label">{{ saving ? '保存中…' : '保存名称' }}</text>
           </view>
+        </view>
+        <view v-else class="field">
+          <text class="field__label">家庭名称</text>
+          <text class="field__readonly">{{ name }}</text>
+          <text class="section__hint">只有管理员能改家庭名称。</text>
         </view>
 
         <view class="section">
@@ -160,12 +192,23 @@ onShow(() => void load())
             <text class="row__name row__name--danger">归档此家庭</text>
           </view>
         </view>
+
+        <view class="section">
+          <text class="section__title">退出这个家庭</text>
+          <text class="section__hint">{{ leaveHint }}</text>
+          <view class="row row--danger" @click="leave">
+            <text class="row__name row__name--danger">退出家庭</text>
+          </view>
+        </view>
       </template>
 
       <u-popup v-model="sheetOpen" mode="bottom" border-radius="24" @close="childTarget = null">
         <view v-if="childTarget" class="sheet">
           <text class="sheet__title">{{ childTarget.name }}</text>
           <text class="sheet__hint">生日 {{ childTarget.birthday }}</text>
+          <view class="sheet__action" @click="editChild(childTarget)">
+            <text class="sheet__action-label">编辑孩子</text>
+          </view>
           <view class="sheet__action sheet__action--danger" @click="removeChild(childTarget)">
             <text class="sheet__action-label">移除孩子</text>
           </view>
@@ -215,6 +258,14 @@ onShow(() => void load())
   border-radius: 16rpx;
   background-color: var(--mb-color-surface);
   color: var(--mb-color-text-primary);
+  font-size: 28rpx;
+}
+
+.field__readonly {
+  padding: 22rpx 24rpx;
+  border-radius: 16rpx;
+  background-color: var(--mb-color-surface-alt);
+  color: var(--mb-color-text-secondary);
   font-size: 28rpx;
 }
 

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { EVENT_TYPES, type EventDto, type EventType } from '@moonbud/shared'
 import { onLoad, onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
-import { computed, ref } from 'vue'
+import { computed, getCurrentInstance, nextTick, ref, watch, type Ref } from 'vue'
 import { eventsApi } from '../../api/endpoints'
 import { canModifyEvent, stageForEdit } from '../../events/event-edit'
+import { centerScrollLeft } from '../../events/chip-scroll'
 import { EVENT_TYPE_META } from '../../events/event-fields'
+import { groupByDay } from '../../events/day-groups'
 import { formatEventLine } from '../../events/format-event'
 import { confirmDanger } from '../../utils/confirm'
 import EmptyState from '../../components/EmptyState.vue'
@@ -39,36 +41,11 @@ const childId = computed(() => childStore.currentChild(familyId.value)?.id ?? ''
 const hasMore = computed(() => events.value.length < total.value)
 
 /** 按天分组：家长回忆"那天下午"，不是"14:32 那条"。 */
-const groups = computed(() => {
-  const out: { key: string; label: string; items: EventDto[] }[] = []
-  for (const event of events.value) {
-    const key = dayKey(event.occurredAt)
-    const last = out[out.length - 1]
-    if (last && last.key === key) last.items.push(event)
-    else out.push({ key, label: dayLabel(key), items: [event] })
-  }
-  return out
-})
+const timezone = computed(() => authStore.user?.timezone ?? 'Asia/Shanghai')
+const groups = computed(() => groupByDay(events.value, timezone.value))
 
-function dayKey(iso: string): string {
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? 'unknown' : `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
-}
-
-function dayLabel(key: string): string {
-  if (key === 'unknown') return '未知时间'
-  const [y, m, d] = key.split('-').map(Number)
-  const now = new Date()
-  const today = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`
-  const yesterday = new Date(now.getTime() - 86_400_000)
-  if (key === today) return '今天'
-  if (key === `${yesterday.getFullYear()}-${yesterday.getMonth()}-${yesterday.getDate()}`) return '昨天'
-  return `${m + 1}月${d}日`
-}
-
-async function load(reset: boolean): Promise<void> {
+async function run(reset: boolean): Promise<void> {
   if (!familyId.value) return
-  if (loading.value) return
   loading.value = true
   error.value = null
   const next = reset ? 1 : page.value + 1
@@ -86,8 +63,20 @@ async function load(reset: boolean): Promise<void> {
     error.value = err instanceof Error ? err.message : '记录加载失败'
   } finally {
     loading.value = false
-    uni.stopPullDownRefresh()
   }
+}
+
+/**
+ * 刷新来源有四条（进入、回到本页、下拉、换家庭），并发时后一次必须真的跑，
+ * 而不是被"正在加载"挡掉 —— 挡掉的结果就是列表停在旧家庭/旧页码上。
+ * 所以排一条链，loading 只用来给 UI 和上拉加载判断"现在忙不忙"。
+ */
+let queue: Promise<void> = Promise.resolve()
+
+function load(reset: boolean): Promise<void> {
+  const next = queue.then(() => run(reset))
+  queue = next.catch(() => undefined)
+  return next
 }
 
 // onLoad 里已经拉过一次；onShow 只负责"从别处回到本页"的那些场合。
@@ -107,7 +96,18 @@ onShow(() => {
   if (ready) void load(true)
 })
 
-onPullDownRefresh(() => void load(true))
+// 换家庭时孩子缓存属于上一个家庭：不重拉就把"有孩子的家庭"说成没有孩子，
+// 而且 childId 为空时列表请求不带过滤条件，全家记录混在一起。
+watch(familyId, async (next, prev) => {
+  if (!next || next === prev || !ready) return
+  await childStore.load(next)
+  await load(true)
+})
+
+// 转圈由发起刷新的这一侧来停：run 里的提前 return（还没有家庭）不会走到 finally。
+onPullDownRefresh(() => {
+  void load(true).finally(() => uni.stopPullDownRefresh())
+})
 onReachBottom(() => {
   if (hasMore.value && !loading.value) void load(false)
 })
@@ -123,6 +123,57 @@ function pickChild(next: string) {
   childStore.select(familyId.value, next)
   void load(true)
 }
+
+/**
+ * 选中的芯片滚到容器中间：横滑条上"当前筛的是哪一类"不该藏在屏幕外，
+ * 从右侧抽屉里选完尤其如此 —— 抽屉列的是全集，滑不到那一项。
+ * 芯片的 scroll-view 不挂 scroll-with-animation：H5 带动画的 scroll-left 走
+ * transform 覆盖层，一旦和真实 scrollLeft 对不上，后续值会被 uni 判为"无需动"而丢掉。
+ */
+const instance = getCurrentInstance()
+const typeScrollLeft = ref(0)
+const childScrollLeft = ref(0)
+const typeIndex = computed(() => typeOptions.value.findIndex((o) => o.value === typeFilter.value))
+const childIndex = computed(() => children.value.findIndex((c) => c.id === childId.value))
+
+function centerChip(containerId: string, rowId: string, chipId: string, index: number, target: Ref<number>): void {
+  if (!instance || index < 0) return
+  const query = uni.createSelectorQuery().in(instance)
+  query.select(`#${containerId}`).boundingClientRect()
+  query.select(`#${rowId}`).boundingClientRect()
+  query.select(`#${chipId}`).boundingClientRect()
+  query.exec((res) => {
+    const [box, row, chip] = (res ?? []) as Array<Record<string, number> | null>
+    if (!box || !row || !chip) return
+    applyScroll(target, centerScrollLeft({
+      containerWidth: box.width ?? 0,
+      rowLeft: row.left ?? 0,
+      rowWidth: row.width ?? 0,
+      chipLeft: chip.left ?? 0,
+      chipWidth: chip.width ?? 0,
+    }))
+  })
+}
+
+/**
+ * uni 的 scroll-left 是"变了才滚"，用户手动滑过之后光靠赋值滚不回来，
+ * 所以同值时借 1px 走一圈：先顶出去，下一帧再落回真正想要的位置。
+ */
+function applyScroll(target: Ref<number>, value: number): void {
+  if (target.value !== value) {
+    target.value = value
+    return
+  }
+  target.value = value + 1
+  void nextTick(() => {
+    target.value = value
+  })
+}
+
+watch([typeIndex, childIndex], ([t, c]) => {
+  centerChip('type-chips', 'type-chip-row', `chip-type-${t}`, t, typeScrollLeft)
+  centerChip('child-chips', 'child-chip-row', `chip-child-${c}`, c, childScrollLeft)
+}, { flush: 'post' })
 
 /** 抽屉里点一次就完事：选完立刻收起，不然用户还得再点一次遮罩。 */
 function chooseType(next: EventType | '') {
@@ -192,10 +243,17 @@ async function removeEvent(event: EventDto): Promise<void> {
       <template v-else>
         <view class="timeline__filters">
           <view class="filter-bar">
-            <scroll-view scroll-x class="chips" :show-scrollbar="false">
-              <view class="chip-row">
+            <scroll-view
+              id="type-chips"
+              scroll-x
+              class="chips"
+              :show-scrollbar="false"
+              :scroll-left="typeScrollLeft"
+            >
+              <view id="type-chip-row" class="chip-row">
                 <view
-                  v-for="opt in typeOptions"
+                  v-for="(opt, oi) in typeOptions"
+                  :id="`chip-type-${oi}`"
                   :key="opt.value"
                   class="chip"
                   :class="{ 'chip--active': typeFilter === opt.value }"
@@ -208,14 +266,22 @@ async function removeEvent(event: EventDto): Promise<void> {
 
             <!-- 横滑看不见的类型在这里全给出来，按钮本身不跟着滚。 -->
             <view class="expand" @click="typeSheetOpen = true">
-              <text class="expand__label">展开</text>
+              <text class="expand__glyph">☰</text>
             </view>
           </view>
 
-          <scroll-view v-if="children.length > 1" scroll-x class="chips" :show-scrollbar="false">
-            <view class="chip-row">
+          <scroll-view
+            v-if="children.length > 1"
+            id="child-chips"
+            scroll-x
+            class="chips"
+            :show-scrollbar="false"
+            :scroll-left="childScrollLeft"
+          >
+            <view id="child-chip-row" class="chip-row">
               <view
-                v-for="c in children"
+                v-for="(c, ci) in children"
+                :id="`chip-child-${ci}`"
                 :key="c.id"
                 class="chip"
                 :class="{ 'chip--active': c.id === childId }"
@@ -319,6 +385,10 @@ async function removeEvent(event: EventDto): Promise<void> {
   display: flex;
   flex-direction: row;
   gap: 12rpx;
+  /* 让行自己的盒子等于芯片总宽：不撑开的话它只有容器宽，
+     居中要用的"内容有多长"量不到，芯片全靠溢出显示。 */
+  width: fit-content;
+  min-width: 100%;
 }
 
 .chip {
@@ -344,14 +414,19 @@ async function removeEvent(event: EventDto): Promise<void> {
 
 .expand {
   flex-shrink: 0;
-  padding: 10rpx 20rpx;
+  width: 72rpx;
+  height: 60rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 999rpx;
   border: 1rpx solid var(--mb-color-border);
   background-color: var(--mb-color-surface);
 }
 
-.expand__label {
-  font-size: 24rpx;
+.expand__glyph {
+  font-size: 30rpx;
+  line-height: 1;
   color: var(--mb-color-text-primary);
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onShow } from '@dcloudio/uni-app'
+import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import { fetchUnreadCount } from '../../notifications/unread'
 import ThemeRoot from '../../components/ThemeRoot.vue'
@@ -29,6 +29,9 @@ async function logout(): Promise<void> {
 const go = (path: string) => () => uni.navigateTo({ url: path })
 
 onShow(() => void refreshUnread())
+onPullDownRefresh(() => {
+  void refreshUnread().finally(() => uni.stopPullDownRefresh())
+})
 </script>
 
 <template>
@@ -90,7 +93,7 @@ onShow(() => void refreshUnread())
       <view class="section">
         <text class="section__title">关于</text>
         <view class="card card--about">
-          <text class="about__name">moonBud · v0.1</text>
+          <text class="about__name">月芽 · v0.1</text>
           <text class="about__limit">已知限制：站内提醒始终可用；APP 被关闭或在后台被系统回收时，本地推送可能不响。</text>
           <text class="about__limit">鸿蒙系统不支持本地推送，这类设备上提醒只出现在提醒中心。</text>
         </view>

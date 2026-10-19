@@ -1,5 +1,6 @@
 import type { ThemePresetId, ThemeMode } from '@moonbud/shared'
 import { THEME_PRESETS, resolveDark, toCssVars } from './presets'
+import { toUViewCssVars } from './uview-bridge'
 
 export const THEME_STORAGE_KEY = 'theme'
 export const THEME_MODE_STORAGE_KEY = 'themeMode'
@@ -25,7 +26,8 @@ export function applyTheme(
   mode: ThemeMode = dark ? 'dark' : 'light',
 ): void {
   const preset = THEME_PRESETS[presetId]
-  persist(toCssVars(dark ? preset.dark : preset.light))
+  const tokens = dark ? preset.dark : preset.light
+  persist({ ...toCssVars(tokens), ...toUViewCssVars(tokens) })
   if (typeof uni !== 'undefined') {
     uni.setStorageSync(THEME_STORAGE_KEY, presetId)
     uni.setStorageSync(THEME_MODE_STORAGE_KEY, mode)

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
-import { EVENT_TYPES, type EventDto, type ReminderDto } from '@moonbud/shared'
+import { EVENT_TYPES, type EventDto } from '@moonbud/shared'
 import ChildSwitcher from '../../components/ChildSwitcher.vue'
 import FamilySwitcher from '../../components/FamilySwitcher.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
@@ -44,14 +44,16 @@ async function refresh(): Promise<void> {
   loading.value = true
   try {
     // 概览只要"最近"的少量记录：拉 30 条足够算出今天换了几次尿布。
-    const [events, reminders] = await Promise.all([
+    // 过期数只借服务端算好的 total（pageSize 1 就够）：重复提醒在列表里 dueAt 是
+    // null，自己筛 ACTIVE 会把它数成 0，横幅于是永远安静。
+    const [events, overduePage] = await Promise.all([
       eventsApi.list(familyId.value, { childId: child.value.id, pageSize: 30 }),
-      remindersApi.list(familyId.value, 'ACTIVE', { pageSize: 20 }),
+      remindersApi.list(familyId.value, 'OVERDUE', { pageSize: 1 }),
     ])
     if (seq !== refreshSeq) return
     summary.value = buildTodaySummary({
       events: events.items as EventDto[],
-      reminders: reminders.items as ReminderDto[],
+      overdueCount: overduePage.total,
       timezone: timezone.value,
     })
     overviewFailed.value = false
@@ -123,7 +125,7 @@ const view = computed(() =>
   }),
 )
 const rows = computed(() => buildOverviewRows(summary.value, overviewFailed.value, timezone.value))
-const overdueCount = computed(() => summary.value?.overdueReminders.length ?? 0)
+const overdueCount = computed(() => summary.value?.overdueCount ?? 0)
 </script>
 
 <template>

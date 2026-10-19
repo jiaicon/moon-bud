@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { computeDueAt, NOTE_MAX_LENGTH, type MemberDto } from '@moonbud/shared'
+import { NOTE_MAX_LENGTH, type MemberDto } from '@moonbud/shared'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { membersApi, remindersApi } from '../../api/endpoints'
-import { cancelLocalNotification, scheduleLocalNotification } from '../../notifications/local-notify'
+import { disarmReminder } from '../../notifications/local-notify'
+import { resyncActiveReminderSchedules } from '../../notifications/reminder-arming'
 import { buildRruleFromUi, parseRruleForUi, RRULE_PRESETS, type RruleKind } from '../../reminders/rrule-presets'
 import { useAuthStore } from '../../stores/auth'
 import { useChildStore } from '../../stores/child'
@@ -131,24 +132,18 @@ async function onSubmit(): Promise<void> {
     const base = { title: title.value.trim(), ...schedule, ...shared }
     // 只有 POST 收 type：PATCH 发过去会被 whitelist 静默丢掉（见 pickType 的注释），
     // 写在这里只会让人以为改得动。
-    const saved = reminderId.value
-      ? await remindersApi.update(familyId.value, reminderId.value, base)
-      : await remindersApi.create(familyId.value, {
-          ...base,
-          type: isRecurring.value ? 'RECURRING' : 'ONE_TIME',
-        })
-
-    // 本地排期只在 APP 端真实存在；其它平台里这个调用会显式警告，不弹窗打扰。
-    const next = computeDueAt({
-      type: saved.type,
-      dueAt: saved.dueAt ? new Date(saved.dueAt) : null,
-      rrule: saved.rrule,
-      timezone: saved.timezone,
-      after: new Date(),
-    })
-    if (next) {
-      scheduleLocalNotification({ id: saved.id, title: saved.title, body: whoLabel(saved.assigneeId), at: next })
+    if (reminderId.value) {
+      await remindersApi.update(familyId.value, reminderId.value, base)
+    } else {
+      await remindersApi.create(familyId.value, {
+        ...base,
+        type: isRecurring.value ? 'RECURRING' : 'ONE_TIME',
+      })
     }
+
+    // 本地排期交给这一家的 ACTIVE 集合重算：新建/改完时间后，接下来几天的每次触发
+    // 都要重新排上，而"这条还在不在待办里"只有服务端知道。
+    await resyncActiveReminderSchedules()
     uni.showToast({ title: '已保存', icon: 'none' })
     setTimeout(() => uni.navigateBack(), 600)
   } catch (err) {
@@ -156,12 +151,6 @@ async function onSubmit(): Promise<void> {
   } finally {
     saving.value = false
   }
-}
-
-function whoLabel(assignee: string | null): string {
-  if (!assignee) return '全家'
-  const member = members.value.find((m) => m.userId === assignee)
-  return member?.displayName || member?.nickname || '家人'
 }
 
 /**
@@ -180,7 +169,8 @@ async function cancelReminder(): Promise<void> {
   saving.value = true
   try {
     await remindersApi.cancel(familyId.value, reminderId.value)
-    cancelLocalNotification(reminderId.value)
+    // 撤销排期不依赖网络：已经说了"别再响了"，就不能因为重算拉不到列表而继续响。
+    disarmReminder(reminderId.value)
     uni.showToast({ title: '已停掉提醒', icon: 'none' })
     setTimeout(() => uni.navigateBack(), 600)
   } catch (err) {

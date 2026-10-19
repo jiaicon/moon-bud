@@ -3,7 +3,7 @@ import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import { computeDueAt, type MemberDto, type ReminderDto, type ReminderListFilter } from '@moonbud/shared'
 import { membersApi, remindersApi } from '../../api/endpoints'
-import { cancelLocalNotification, scheduleLocalNotification } from '../../notifications/local-notify'
+import { resyncActiveReminderSchedules, assigneeLabel } from '../../notifications/reminder-arming'
 import { formatDueIn } from '../../reminders/due-label'
 import EmptyState from '../../components/EmptyState.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
@@ -27,11 +27,8 @@ const error = ref<string | null>(null)
 
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
 
-function whoLabel(assigneeId: string | null): string {
-  if (!assigneeId) return '全家'
-  const member = members.value.find((m) => m.userId === assigneeId)
-  return member?.displayName || member?.nickname || '家人'
-}
+// 卡片上的"该谁"和推送正文必须是同一句话，所以用同一个函数，别各写一份。
+const whoLabel = (assigneeId: string | null) => assigneeLabel(members.value, assigneeId)
 
 /**
  * 后端列表里重复提醒的 dueAt 是 null（下一次由调度器按周期展开），
@@ -109,18 +106,12 @@ async function run(): Promise<void> {
  */
 async function complete(reminder: ReminderDto): Promise<void> {
   try {
-    const updated = await remindersApi.complete(familyId.value, reminder.id)
-    const next = computeDueAt({
-      type: updated.type,
-      dueAt: updated.dueAt ? new Date(updated.dueAt) : null,
-      rrule: updated.rrule,
-      timezone: updated.timezone,
-      after: new Date(),
-    })
-    if (next) scheduleLocalNotification({ id: updated.id, title: updated.title, body: whoLabel(updated.assigneeId), at: next })
-    else cancelLocalNotification(updated.id)
+    await remindersApi.complete(familyId.value, reminder.id)
     uni.showToast({ title: '已完成本次', icon: 'none' })
     await load()
+    // 排期交给这一家的 ACTIVE 集合重算：本机点完这一次，下一次该在什么时候响
+    // 不由这里猜，而由"服务端还列出它吗"决定 —— 别的设备上的改动也一起跟上。
+    await resyncActiveReminderSchedules()
   } catch (err) {
     uni.showToast({ title: err instanceof Error ? err.message : '操作失败', icon: 'none' })
   }

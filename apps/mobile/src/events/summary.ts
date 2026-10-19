@@ -1,15 +1,20 @@
-import type { EventDto, ReminderDto } from '@moonbud/shared'
+import type { EventDto } from '@moonbud/shared'
 
 export interface TodaySummary {
   lastFeeding: EventDto | null
   lastSleep: EventDto | null
   diaperCount: number
-  overdueReminders: ReminderDto[]
+  overdueCount: number
 }
 
 export interface BuildTodaySummaryParams {
   events: EventDto[]
-  reminders: ReminderDto[]
+  /**
+   * 过期几条由服务端算，客户端不自己筛：重复提醒在列表里 `dueAt` 是 null
+   * （下一次靠实例展开），自己按 dueAt 挑就等于"每天 20:00 喂药"过期三小时、
+   * 首页还是一个字都不提。服务端的 OVERDUE 是"活跃 + 有到期未完成的实例"。
+   */
+  overdueCount: number
   now?: Date
   /** 家庭所在时区：「今天」必须按它算，而不是按设备本地日期。 */
   timezone: string
@@ -55,7 +60,6 @@ function latestOf(events: EventDto[], type: EventDto['type']): EventDto | null {
 export function buildTodaySummary(params: BuildTodaySummaryParams): TodaySummary {
   const now = params.now ?? new Date()
   const todayKey = dayKeyIn(params.timezone, now)
-  const nowMs = now.getTime()
 
   const diaperToday = params.events.filter((event) => {
     if (event.type !== 'diaper') return false
@@ -63,16 +67,10 @@ export function buildTodaySummary(params: BuildTodaySummaryParams): TodaySummary
     return !Number.isNaN(at) && dayKeyIn(params.timezone, new Date(at)) === todayKey
   })
 
-  const overdue = params.reminders.filter((reminder) => {
-    if (reminder.status !== 'ACTIVE' || !reminder.dueAt) return false
-    const due = Date.parse(reminder.dueAt)
-    return !Number.isNaN(due) && due <= nowMs
-  })
-
   return {
     lastFeeding: latestOf(params.events, 'feeding'),
     lastSleep: latestOf(params.events, 'sleep'),
     diaperCount: diaperToday.length,
-    overdueReminders: overdue,
+    overdueCount: params.overdueCount,
   }
 }

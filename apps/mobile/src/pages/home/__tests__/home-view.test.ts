@@ -7,7 +7,7 @@ const summary: TodaySummary = {
   lastFeeding: { occurredAt: '2026-10-19T06:00:00.000Z' } as EventDto,
   lastSleep: null,
   diaperCount: 2,
-  overdueReminders: [],
+  overdueCount: 0,
 }
 
 describe('首页视图判定', () => {

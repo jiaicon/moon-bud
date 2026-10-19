@@ -1,36 +1,54 @@
+import { occurrencesWithinWindow, type WindowSource } from '../reminders/occurrence-window'
+
 /**
  * 本地通知是加分项，站内提醒中心才是 v1 的主力（spec 第 6 节）。
  * 这里必须用条件编译而不是运行时判断：鸿蒙端没有 plus API，
  * 而 `if (typeof plus !== 'undefined')` 在编译期挡不住对 plus 的引用。
  */
 
-interface ScheduledNotification {
-  id: string
+/** 一条已排好的推送：plus 只认"某个时刻响一次"。 */
+interface ScheduledRow {
+  /** 归属的提醒 id。一个提醒在窗口里可能占好几条，撤销要能按它找齐。 */
+  owner: string
+  /** 归属的家庭 id：重建排期按家庭为单位，不能顺手抹掉另一个家庭的提醒。 */
+  family: string
   title: string
   body: string
   /** 触发时刻的毫秒数：storage 里存 Date 会被序列化掉。 */
   at: number
 }
 
-const SCHEDULED_KEY = 'localNotifications'
+/** 要武装的东西：一条提醒 + 推送上显示的字。 */
+export interface ArmableReminder extends WindowSource {
+  id: string
+  title: string
+  body: string
+}
 
-function readScheduled(): Record<string, ScheduledNotification> {
-  const stored = uni.getStorageSync(SCHEDULED_KEY)
-  return stored && typeof stored === 'object' ? (stored as Record<string, ScheduledNotification>) : {}
+export const SCHEDULE_KEY = 'localNotifications'
+
+// #ifndef APP-PLUS
+// H5/小程序里排期只是写进本地登记表、不会真的响。说一次，别让人以为提醒坏了；
+// 每次进前台都喊一遍就成了噪音，所以只说一次。
+let warnedUnsupported = false
+// #endif
+
+function readScheduled(): Record<string, ScheduledRow> {
+  const stored = uni.getStorageSync(SCHEDULE_KEY)
+  return stored && typeof stored === 'object' ? (stored as Record<string, ScheduledRow>) : {}
 }
 
 /**
  * plus 只有"清空全部本地排期"，没有"按 id 撤销一条"。
- * 因此把排期记在本地，每次改动都清空后按登记表重建 ——
- * 否则撤销一个提醒会顺手抹掉全家其它提醒的推送。
+ * 因此每次改动都清空后按登记表重建 —— 否则撤销一个提醒会顺手抹掉全家其它提醒的推送。
  */
-function rescheduleAll(scheduled: Record<string, ScheduledNotification>): void {
-  uni.setStorageSync(SCHEDULED_KEY, scheduled)
+function rescheduleAll(scheduled: Record<string, ScheduledRow>): void {
+  uni.setStorageSync(SCHEDULE_KEY, scheduled)
   // #ifdef APP-PLUS
   plus.push.clear()
   for (const record of Object.values(scheduled)) {
     if (record.at <= Date.now()) continue
-    plus.push.createMessage(record.body, JSON.stringify({ id: record.id }), {
+    plus.push.createMessage(record.body, JSON.stringify({ id: record.owner }), {
       title: record.title,
       when: new Date(record.at),
     })
@@ -38,31 +56,78 @@ function rescheduleAll(scheduled: Record<string, ScheduledNotification>): void {
   // #endif
 }
 
-export function scheduleLocalNotification(params: { id: string; title: string; body: string; at: Date }): void {
+/**
+ * 把一个家庭当前该响的提醒，在未来窗口里的每一次触发都排上。
+ *
+ * 只排"下一次"是不够的：家长建好"每天 20:00"之后不会再打开它的表单，第一次推送响过，
+ * 表里就只剩一个已经过去的时刻，这个提醒从此哑掉。
+ *
+ * 传入的是这个家庭**完整**的待办列表，所以整块替换这一家的条目：在别的设备上做完或
+ * 停掉的提醒，本机重算后就地消失，不会继续"该喂药了"。
+ *
+ * `knownFamilyIds` 是这个账号现在还名下的家庭。归档与退出都不碰别的家庭那一次重算，
+ * 所以不在名单里的那个家留下的推送没人会清——人都不在这个家了，锁屏还继续"该喂药了"
+ * 直到窗口过完，这就是撒谎。名单必须是完整的（空数组会把所有别的家庭抹掉）。
+ *
+ * `familyId` 为 null 表示这一台设备上当前没有可选家庭（最后一家也归档/退出了）：
+ * 没有哪一家要重建，但表还是得按名单洗一遍，不然那几天的推送没人来清。
+ */
+export function armReminders(
+  familyId: string | null,
+  reminders: ArmableReminder[],
+  knownFamilyIds: string[],
+  now: Date = new Date(),
+): void {
+  const rebuilt: Record<string, ScheduledRow> = {}
+  for (const [key, row] of Object.entries(readScheduled())) {
+    // 这一家整块重建，所以它自己的旧条目一律不留。
+    // 旧版一条提醒只排一次，条目里没有 family：它不属于任何一次重算，
+    // 于是家庭都删了推送还压在表里。顺手一起清掉。
+    if (!row.family || row.family === familyId || !knownFamilyIds.includes(row.family) || row.at <= now.getTime()) {
+      continue
+    }
+    rebuilt[key] = row
+  }
+  if (familyId) {
+    for (const reminder of reminders) {
+      for (const at of occurrencesWithinWindow(reminder, now)) {
+        rebuilt[`${reminder.id}#${at.getTime()}`] = {
+          owner: reminder.id,
+          family: familyId,
+          title: reminder.title,
+          body: reminder.body,
+          at: at.getTime(),
+        }
+      }
+    }
+  }
+  rescheduleAll(rebuilt)
   // #ifndef APP-PLUS
-  console.warn('[moonBud] 当前平台不支持本地通知，提醒仅出现在站内提醒中心')
+  if (!warnedUnsupported) {
+    warnedUnsupported = true
+    console.warn('[moonBud] 当前平台不支持本地通知，提醒仅出现在站内提醒中心')
+  }
   // #endif
-  // 同 id 覆盖：编辑提醒时旧排期不会留下第二条。
-  rescheduleAll({
-    ...readScheduled(),
-    [params.id]: { id: params.id, title: params.title, body: params.body, at: params.at.getTime() },
-  })
-}
-
-export function cancelLocalNotification(id: string): void {
-  const scheduled = readScheduled()
-  if (!(id in scheduled)) return
-  delete scheduled[id]
-  rescheduleAll(scheduled)
 }
 
 /**
- * 冷启动重建一次：登记表里已经过期的条目会被丢掉（rescheduleAll 跳过 at<=now），
- * 还没到的重新排上。不这么做，App 关着的时候攒下的过期条目会一直留在表里，
- * 而下一次任何改动都会把它们和真实排期一起重放。
+ * 停掉/删掉一条提醒：本地立刻撤销它自己的排期，不等下一次重算。
+ * 走网络的重算会失败（离线、后端没起来），而"我已经叫它别再响了"不该看网络脸色。
+ */
+export function disarmReminder(id: string): void {
+  const kept = Object.entries(readScheduled()).filter(([, row]) => row.owner !== id)
+  rescheduleAll(Object.fromEntries(kept))
+}
+
+/**
+ * 冷启动重放一次表里的排期。定时通知由系统持有，杀进程通常还在，但设备重启、系统回收、
+ * 或表里攒着过期条目都会让它不对：先清空再按表重建，顺手把过去了的死条目删掉，
+ * 否则那些旧时刻会一直留在存储里，被下一次重算当现状写回。
  */
 export function rearmLocalNotifications(): void {
-  rescheduleAll(readScheduled())
+  const now = Date.now()
+  const live = Object.entries(readScheduled()).filter(([, row]) => row.family && row.at > now)
+  rescheduleAll(Object.fromEntries(live))
 }
 
 /**
@@ -70,7 +135,7 @@ export function rearmLocalNotifications(): void {
  * 在这台手机上登录，仍会收到上一个账号那个家庭的"该喂药了"。
  */
 export function clearLocalNotifications(): void {
-  uni.removeStorageSync(SCHEDULED_KEY)
+  uni.removeStorageSync(SCHEDULE_KEY)
   // #ifdef APP-PLUS
   plus.push.clear()
   // #endif

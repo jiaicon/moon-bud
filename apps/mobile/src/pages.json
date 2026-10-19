@@ -38,6 +38,12 @@
 			}
 		},
 		{
+			"path": "pages/child-form/index",
+			"style": {
+				"navigationBarTitleText": "添加孩子"
+			}
+		},
+		{
 			"path": "pages/home/index",
 			"style": {
 				"navigationBarTitleText": "首页"

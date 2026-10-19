@@ -184,6 +184,8 @@ const goBack = () => uni.navigateBack()
           <text class="form__title">{{ meta!.icon }} {{ meta!.label }}</text>
           <text class="form__switch" @click="backToGrid">换一种</text>
         </view>
+        <!-- 记在哪个孩子身上必须写在脸上：切换家庭后填错孩子，事后连错在哪都不知道。 -->
+        <text class="form__child">记录对象：{{ child ? child.name : '未选择孩子' }}</text>
 
         <view v-if="duplicateHint" class="hint">
           <text class="hint__text">{{ duplicateHint }}，确定要再记一次吗？</text>
@@ -292,6 +294,11 @@ const goBack = () => uni.navigateBack()
 .form__switch {
   font-size: 26rpx;
   color: var(--mb-color-primary);
+}
+
+.form__child {
+  font-size: 24rpx;
+  color: var(--mb-color-text-secondary);
 }
 
 .grid {

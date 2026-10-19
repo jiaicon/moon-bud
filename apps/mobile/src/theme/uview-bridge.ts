@@ -1,4 +1,5 @@
 import type { ThemeTokens } from './tokens'
+import { toCssVars } from './presets'
 
 /**
  * uView Pro 的组件只读它自己那套 `--u-*` 变量，而 `theme.scss` 里那些值是写死的浅色。
@@ -70,4 +71,15 @@ export function toUViewCssVars(tokens: ThemeTokens): Record<string, string> {
   vars['--u-mask-color'] = isDark(tokens) ? 'rgba(0, 0, 0, 0.68)' : 'rgba(0, 0, 0, 0.4)'
   vars['--u-shadow-color'] = isDark(tokens) ? 'rgba(0, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.1)'
   return vars
+}
+
+/**
+ * 段内联用的 "a:b;c:d" 变量表。每个页面的根节点必须带上它：uView 的 theme.scss 把
+ * 默认值声明在 `:root, page` 上，而 `page` 比 documentElement 离内容更近，会把只写在
+ * 根元素上的值盖掉 —— 于是深色模式的弹层仍是白底。
+ */
+export function themeVarsStyle(tokens: ThemeTokens): string {
+  return Object.entries({ ...toCssVars(tokens), ...toUViewCssVars(tokens) })
+    .map(([name, value]) => `${name}:${value}`)
+    .join(';')
 }

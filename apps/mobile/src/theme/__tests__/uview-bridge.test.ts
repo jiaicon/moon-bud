@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { THEME_PRESETS } from '../presets'
-import { toUViewCssVars } from '../uview-bridge'
+import { themeVarsStyle, toUViewCssVars } from '../uview-bridge'
 import type { ThemeTokens } from '../tokens'
 
 /**
@@ -57,5 +57,22 @@ describe('uView 变量桥接', () => {
     expect(toUViewCssVars(THEME_PRESETS['mist-blue'].light)['--u-mask-color']).toBe(
       'rgba(0, 0, 0, 0.4)',
     )
+  })
+
+  it('themeVarsStyle 把两套变量拼成一段内联样式', () => {
+    const tokens = THEME_PRESETS['mist-blue'].dark
+    const style = themeVarsStyle(tokens)
+    expect(style).toContain(`--mb-color-surface:${tokens.surface}`)
+    expect(style).toContain(`--u-bg-white:${tokens.surface}`)
+    expect(style.endsWith(';')).toBe(false)
+  })
+
+  it('弹层必须靠内联样式拿变量：uView 的 theme.scss 把默认值挂在 page 上，比 documentElement 更近', () => {
+    const tokens = THEME_PRESETS['cream-orange'].dark
+    const vars = { ...toUViewCssVars(tokens) }
+    // 这条钉住的是"页内根节点自己带一份"这个事实 —— 只写 documentElement 时，
+    // page 上的 #ffffff 会盖掉它，深色模式的弹层就还是白底。
+    expect(vars['--u-bg-white']).toBe(tokens.surface)
+    expect(themeVarsStyle(tokens)).toContain('--u-bg-white')
   })
 })

@@ -1,25 +1,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useThemeStore } from '../stores/theme'
-import { toCssVars } from '../theme/presets'
+import { themeVarsStyle } from '../theme/uview-bridge'
 
 const themeStore = useThemeStore()
 
 /**
- * H5 端 applyTheme 已把变量写进 documentElement，这里不必再绑；小程序与 APP 端没有
- * document，变量必须由这个根节点带着，否则子树里的 var(--mb-color-*) 全部落空。
+ * 变量必须绑在这个根节点上，H5 也要：documentElement 那份会被 uView 声明在
+ * `:root, page` 上的默认值盖掉（`page` 离内容更近），弹层就会在深色模式里留白底。
  */
-const rootStyle = computed(() => {
-  // #ifdef H5
-  return ''
-  // #endif
-  // #ifndef H5
-  const tokens = themeStore.isDark ? themeStore.preset.dark : themeStore.preset.light
-  return Object.entries(toCssVars(tokens))
-    .map(([name, value]) => `${name}:${value}`)
-    .join(';')
-  // #endif
-})
+const rootStyle = computed(() =>
+  themeVarsStyle(themeStore.isDark ? themeStore.preset.dark : themeStore.preset.light),
+)
 </script>
 
 <template>

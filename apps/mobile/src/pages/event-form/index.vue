@@ -11,6 +11,7 @@ import { onLoad } from '@dcloudio/uni-app'
 import { computed, reactive, ref } from 'vue'
 import { eventsApi } from '../../api/endpoints'
 import { EVENT_TYPE_META, fieldsFor, NON_BLOCKING_NOTICES, type FieldSpec } from '../../events/event-fields'
+import { eventToFormState, takeForEdit } from '../../events/event-edit'
 import { shouldWarnDuplicate } from '../../events/duplicate-warning'
 import { zhValidationMessage } from '../../events/validation-messages'
 import ThemeRoot from '../../components/ThemeRoot.vue'
@@ -21,6 +22,8 @@ const familyStore = useFamilyStore()
 const childStore = useChildStore()
 
 const type = ref<EventType | ''>('')
+const editingId = ref('')
+const editingChildId = ref('')
 const values = reactive<Record<string, string>>({})
 const errors = reactive<Record<string, string>>({})
 const note = ref('')
@@ -39,6 +42,14 @@ const fields = computed<FieldSpec[]>(() => (type.value ? fieldsFor(type.value) :
 const meta = computed(() => (type.value ? EVENT_TYPE_META[type.value] : null))
 /** 只有睡眠需要"结束时间"，其它类型的时长写在 payload 里。 */
 const needsEnd = computed(() => type.value === 'sleep')
+
+const targetChildName = computed(() => {
+  if (!editingId.value) return child.value ? child.value.name : '未选择孩子'
+  const found = (childStore.childrenByFamily[familyId.value] ?? []).find(
+    (c) => c.id === editingChildId.value,
+  )
+  return found ? found.name : '（这条记录的孩子不在当前家庭里）'
+})
 
 function fmt(d: Date, kind: 'date' | 'time'): string {
   const p = (n: number) => String(n).padStart(2, '0')
@@ -93,6 +104,28 @@ onLoad(async (query) => {
   await familyStore.load()
   if (familyId.value) await childStore.load(familyId.value)
   const requested = String(query?.type ?? '')
+  const id = String(query?.id ?? '')
+  if (id) {
+    // 列表页把整条记录交接过来（后端没有 GET /events/:id）。取不到就是交接丢了，
+    // 宁可退回新建，也不给一张空白表单让人"改了个不存在的东西"。
+    const target = takeForEdit(id)
+    if (!target) {
+      uni.showToast({ title: '没拿到那条记录，请从列表再点一次', icon: 'none' })
+      setTimeout(() => uni.navigateBack(), 900)
+      return
+    }
+    editingId.value = target.id
+    editingChildId.value = target.childId
+    type.value = target.type
+    const state = eventToFormState(target)
+    for (const [key, value] of Object.entries(state.values)) values[key] = value
+    note.value = state.note
+    date.value = state.date
+    time.value = state.time
+    endDate.value = state.endDate
+    endTime.value = state.endTime
+    return
+  }
   if (isEventType(requested)) chooseType(requested)
 })
 
@@ -128,7 +161,9 @@ function assignErrors(messages: string[]): void {
 
 async function onSubmit(): Promise<void> {
   if (saving.value || !type.value) return
-  if (!familyId.value || !child.value) {
+  // 编辑走记录自己挂的孩子；"当前孩子"是记录页的筛选口径，拿它覆盖会顺手把孩子改掉。
+  const childId = editingId.value ? editingChildId.value : child.value?.id ?? ''
+  if (!familyId.value || !childId) {
     uni.showToast({ title: '请先创建家庭并添加孩子', icon: 'none' })
     return
   }
@@ -145,16 +180,22 @@ async function onSubmit(): Promise<void> {
   }
 
   saving.value = true
+  const body = {
+    childId,
+    type: type.value,
+    occurredAt: localIso(date.value, time.value),
+    endedAt: needsEnd.value && endDate.value ? localIso(endDate.value, endTime.value || '00:00') : null,
+    payload: result.data,
+    note: note.value.trim() || null,
+  }
   try {
-    await eventsApi.create(familyId.value, {
-      childId: child.value.id,
-      type: type.value,
-      occurredAt: localIso(date.value, time.value),
-      endedAt: needsEnd.value && endDate.value ? localIso(endDate.value, endTime.value || '00:00') : null,
-      payload: result.data,
-      note: note.value.trim() || null,
-    })
-    uni.showToast({ title: '已记录', icon: 'none' })
+    if (editingId.value) {
+      await eventsApi.update(familyId.value, editingId.value, body)
+      uni.showToast({ title: '已更新', icon: 'none' })
+    } else {
+      await eventsApi.create(familyId.value, body)
+      uni.showToast({ title: '已记录', icon: 'none' })
+    }
     setTimeout(() => uni.navigateBack(), 600)
   } catch (err) {
     uni.showToast({ title: err instanceof Error ? err.message : '保存失败', icon: 'none' })
@@ -181,13 +222,13 @@ const goBack = () => uni.navigateBack()
 
       <view v-else class="form__fields">
         <view class="form__head">
-          <text class="form__title">{{ meta!.icon }} {{ meta!.label }}</text>
-          <text class="form__switch" @click="backToGrid">换一种</text>
+          <text class="form__title">{{ editingId ? '编辑' : meta!.icon + ' ' + meta!.label }}</text>
+          <text v-if="!editingId" class="form__switch" @click="backToGrid">换一种</text>
         </view>
         <!-- 记在哪个孩子身上必须写在脸上：切换家庭后填错孩子，事后连错在哪都不知道。 -->
-        <text class="form__child">记录对象：{{ child ? child.name : '未选择孩子' }}</text>
+        <text class="form__child">记录对象：{{ targetChildName }}</text>
 
-        <view v-if="duplicateHint" class="hint">
+        <view v-if="duplicateHint && !editingId" class="hint">
           <text class="hint__text">{{ duplicateHint }}，确定要再记一次吗？</text>
         </view>
         <view v-if="NON_BLOCKING_NOTICES[type]" class="hint hint--soft">

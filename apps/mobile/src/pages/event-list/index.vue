@@ -3,14 +3,18 @@ import { EVENT_TYPES, type EventDto, type EventType } from '@moonbud/shared'
 import { onLoad, onPullDownRefresh, onReachBottom, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import { eventsApi } from '../../api/endpoints'
+import { canModifyEvent, stageForEdit } from '../../events/event-edit'
 import { EVENT_TYPE_META } from '../../events/event-fields'
 import { formatEventLine } from '../../events/format-event'
+import { confirmDanger } from '../../utils/confirm'
 import ThemeRoot from '../../components/ThemeRoot.vue'
+import { useAuthStore } from '../../stores/auth'
 import { useChildStore } from '../../stores/child'
 import { useFamilyStore } from '../../stores/family'
 
 const PAGE_SIZE = 20
 
+const authStore = useAuthStore()
 const familyStore = useFamilyStore()
 const childStore = useChildStore()
 
@@ -115,6 +119,39 @@ function pickChild(next: string) {
 const goForm = () => uni.navigateTo({ url: '/pages/event-form/index' })
 const goFamily = () => uni.navigateTo({ url: '/pages/family-select/index' })
 const goChild = () => uni.navigateTo({ url: '/pages/child-form/index' })
+
+const myRole = computed(() => familyStore.currentFamily?.role ?? null)
+
+function editEvent(event: EventDto): void {
+  if (!canModifyEvent(event, authStore.user?.id ?? null, myRole.value)) {
+    uni.showToast({ title: '只有记这条的人或管理员能改', icon: 'none' })
+    return
+  }
+  // 后端没有 GET /events/:id，整条记录由这里交接给表单（见 events/event-edit.ts）。
+  stageForEdit(event)
+  uni.navigateTo({ url: `/pages/event-form/index?id=${event.id}` })
+}
+
+async function removeEvent(event: EventDto): Promise<void> {
+  if (!canModifyEvent(event, authStore.user?.id ?? null, myRole.value)) {
+    uni.showToast({ title: '只有记这条的人或管理员能删', icon: 'none' })
+    return
+  }
+  const go = await confirmDanger({
+    title: '删掉这条记录？',
+    content: `${formatEventLine(event)} —— ${event.createdByNickname} 记的。删掉后全家都看不到它了。`,
+    confirmText: '删除',
+  })
+  if (!go) return
+  try {
+    await eventsApi.remove(familyId.value, event.id)
+    events.value = events.value.filter((e) => e.id !== event.id)
+    total.value = Math.max(0, total.value - 1)
+    uni.showToast({ title: '已删除', icon: 'none' })
+  } catch (err) {
+    uni.showToast({ title: err instanceof Error ? err.message : '删除失败', icon: 'none' })
+  }
+}
 </script>
 
 <template>
@@ -172,8 +209,13 @@ const goChild = () => uni.navigateTo({ url: '/pages/child-form/index' })
       <view v-for="group in groups" :key="group.key" class="group">
         <text class="group__label">{{ group.label }}</text>
         <view v-for="event in group.items" :key="event.id" class="card">
-          <text class="card__line">{{ formatEventLine(event) }}</text>
-          <text class="card__who">{{ event.createdByNickname }} 记</text>
+          <view class="card__main" @click="editEvent(event)">
+            <text class="card__line">{{ formatEventLine(event) }}</text>
+            <text class="card__who">{{ event.createdByNickname }} 记 · 点此编辑</text>
+          </view>
+          <view class="card__delete" @click="removeEvent(event)">
+            <text class="card__delete-label">删除</text>
+          </view>
         </view>
       </view>
 
@@ -263,11 +305,30 @@ const goChild = () => uni.navigateTo({ url: '/pages/child-form/index' })
 
 .card {
   display: flex;
-  flex-direction: column;
-  gap: 6rpx;
+  flex-direction: row;
+  align-items: center;
+  gap: 16rpx;
   padding: 24rpx;
   border-radius: 20rpx;
   background-color: var(--mb-color-surface);
+}
+
+.card__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.card__delete {
+  padding: 10rpx 20rpx;
+  border-radius: 999rpx;
+  border: 1rpx solid var(--mb-color-border);
+}
+
+.card__delete-label {
+  font-size: 22rpx;
+  color: var(--mb-color-error);
 }
 
 .card__line {

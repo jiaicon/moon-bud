@@ -22,6 +22,7 @@
     "@dcloudio/uni-mp-weixin": "3.0.0-5020420260813003",
     "@moonbud/shared": "workspace:*",
     "pinia": "^2.2.6",
+    "qrcode": "^1.5.4",
     "uview-pro": "^0.6.21",
     "vue": "^3.4.21"
   },
@@ -30,6 +31,7 @@
     "@dcloudio/uni-cli-shared": "3.0.0-5020420260813003",
     "@dcloudio/uni-stacktracey": "3.0.0-5020420260813003",
     "@dcloudio/vite-plugin-uni": "3.0.0-5020420260813003",
+    "@types/qrcode": "^1.5.6",
     "@vue/runtime-core": "^3.4.21",
     "@vue/tsconfig": "^0.5.1",
     "sass": "^1.105.2",

@@ -114,6 +114,7 @@ function pickChild(next: string) {
 
 const goForm = () => uni.navigateTo({ url: '/pages/event-form/index' })
 const goFamily = () => uni.navigateTo({ url: '/pages/family-select/index' })
+const goChild = () => uni.navigateTo({ url: '/pages/child-form/index' })
 </script>
 
 <template>
@@ -122,6 +123,11 @@ const goFamily = () => uni.navigateTo({ url: '/pages/family-select/index' })
       <view v-if="!familyId" class="timeline__notice">
         <text class="timeline__notice-text">还没有家庭，先创建一个才能记录。</text>
         <view class="btn btn--ghost" @click="goFamily"><text class="btn__label">去创建家庭</text></view>
+      </view>
+
+      <view v-else-if="!childId" class="timeline__notice">
+        <text class="timeline__notice-text">这个家庭还没有孩子，先添加一个才能记。</text>
+        <view class="btn btn--ghost" @click="goChild"><text class="btn__label">添加孩子</text></view>
       </view>
 
       <view v-else class="timeline__filters">
@@ -178,7 +184,7 @@ const goFamily = () => uni.navigateTo({ url: '/pages/family-select/index' })
       />
       <text v-if="loading" class="timeline__loading">加载中…</text>
 
-      <view class="fab" @click="goForm"><text class="fab__label">＋</text></view>
+      <view v-if="childId" class="fab" @click="goForm"><text class="fab__label">＋</text></view>
     </view>
   </theme-root>
 </template>

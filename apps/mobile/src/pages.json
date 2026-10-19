@@ -69,6 +69,42 @@
 			}
 		},
 		{
+			"path": "pages/reminder-form/index",
+			"style": {
+				"navigationBarTitleText": "提醒"
+			}
+		},
+		{
+			"path": "pages/notification-center/index",
+			"style": {
+				"navigationBarTitleText": "提醒中心"
+			}
+		},
+		{
+			"path": "pages/family-settings/index",
+			"style": {
+				"navigationBarTitleText": "家庭设置"
+			}
+		},
+		{
+			"path": "pages/member-list/index",
+			"style": {
+				"navigationBarTitleText": "家庭成员"
+			}
+		},
+		{
+			"path": "pages/invite-qrcode/index",
+			"style": {
+				"navigationBarTitleText": "邀请家人"
+			}
+		},
+		{
+			"path": "pages/theme-settings/index",
+			"style": {
+				"navigationBarTitleText": "主题设置"
+			}
+		},
+		{
 			"path": "pages/profile/index",
 			"style": {
 				"navigationBarTitleText": "我的"

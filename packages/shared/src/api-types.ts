@@ -30,7 +30,12 @@ export type OccurrenceStatus = 'PENDING' | 'DONE' | 'SKIPPED'
 /** 提醒列表的视图分段。"已过期"是查询时计算的，不落库。 */
 export type ReminderListFilter = 'ACTIVE' | 'OVERDUE' | 'DONE' | 'CANCELLED'
 
-export type ThemePresetId = 'mist-blue' | 'cream-orange' | 'mint-green' | 'dusk-purple'
+export type ThemePresetId =
+  | 'mist-blue'
+  | 'cream-orange'
+  | 'mint-green'
+  | 'dusk-purple'
+  | 'peach-pink'
 
 export type ThemeMode = 'light' | 'dark' | 'auto'
 

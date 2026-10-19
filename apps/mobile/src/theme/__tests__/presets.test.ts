@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { THEME_PRESETS, lightTokens, resolveDark, tokenNames, toCssVars } from '../presets'
 
 describe('主题预设', () => {
-  it('恰好 4 套预设，且 id 与键一致', () => {
-    expect(Object.keys(THEME_PRESETS)).toHaveLength(4)
+  it('恰好 5 套预设，且 id 与键一致', () => {
+    expect(Object.keys(THEME_PRESETS)).toHaveLength(5)
     for (const [key, preset] of Object.entries(THEME_PRESETS)) {
       expect(preset.id).toBe(key)
     }
@@ -21,9 +21,21 @@ describe('主题预设', () => {
     }
   })
 
-  it('四套预设的 primary 互不相同（否则换肤没有可见效果）', () => {
+  it('五套预设的 primary 互不相同（否则换肤没有可见效果）', () => {
     const primaries = Object.values(THEME_PRESETS).map((p) => p.light.primary.toLowerCase())
-    expect(new Set(primaries).size).toBe(4)
+    expect(new Set(primaries).size).toBe(5)
+  })
+
+  it('粉色预设真的是粉的', () => {
+    const pink = THEME_PRESETS['peach-pink']
+    expect(pink.name).toContain('粉')
+    for (const tokens of [pink.light, pink.dark]) {
+      const r = parseInt(tokens.primary.slice(1, 3), 16)
+      const g = parseInt(tokens.primary.slice(3, 5), 16)
+      const b = parseInt(tokens.primary.slice(5, 7), 16)
+      expect(r, `${tokens.primary} 的红通道必须最高才是粉/玫红系`).toBeGreaterThan(g)
+      expect(r).toBeGreaterThan(b)
+    }
   })
 
   it('暗色版背景比文字暗（对比方向不能反）', () => {

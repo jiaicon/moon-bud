@@ -115,7 +115,7 @@ dfb9ee4 feat(api): add member management with last-owner invariant
 
 `2026-10-16-mobile-app.md` 的 9 个 task 全部完成，随后做了一次全新上下文的整支终审
 （`review-package`，范围 `dd6dd91..0d534aa`），并按用户圈定的范围修完了 4 个 Critical
-加两条写路径缺口。当前门禁：`pnpm --filter @moonbud/mobile test` 118/118、
+加两条写路径缺口。当前门禁：`pnpm --filter @moonbud/mobile test` 202/202（26 个文件）、
 `type-check` 干净、`build:h5` 成功；`pnpm --filter @moonbud/api test:e2e` 131/131、
 `typecheck` 干净。
 
@@ -135,31 +135,28 @@ dfb9ee4 feat(api): add member management with last-owner invariant
 - **I-12** 找回请求真的会通知同家庭的其他 OWNER/ADMIN（站内通知，10 分钟冷却），
   页面文案同步。
 
-### 仍然欠着的（用户明确排除在本轮之外）
+### 2026-10-19 晚：这批欠账已清（I-4…I-14 + 大部分 Minor）
 
-`I-4` 退出家庭/转让所有权没有 UI；`I-5` 原生 tabBar/导航栏写死在 `pages.json`，
-没有 `setTabBarStyle`/`setNavigationBarColor`（深色模式上下两条栏是白的，且
-`#4A7FB5` 是没过 WCAG 的旧雾蓝）；`I-6` 记录页下拉刷新可能永远转圈
-（`if (loading) return` 早于 `finally`）；`I-7` 换家庭后记录页不重载孩子缓存，
-"有孩子的家庭被告知没有孩子"且列表混全家记录；`I-9` 周期提醒停不掉
-（`remindersApi.cancel` 无调用点）；`I-11` 孩子不能编辑（`childrenApi.update` 无调用点）；
-`I-13` 邀请二维码指向 `/join` 落地页而客户端没有这个页面（计划本身就漏了这个 task，
-`VITE_INVITE_BASE_URL` 默认也没配）；`I-14` 二维码按主题绘制，深色=反色码，微信解码不可靠。
-`endpoints.ts` 里现在还剩这些零调用点函数：`remindersApi.cancel` / `occurrences`、
-`familiesApi.leave` / `transfer`、`childrenApi.update`——按"死掉的客户端 API 就是没人做的
-spec 条目"来读。
+`I-4` 退出/转让有了 UI（成员管理里 OWNER 可"转让创建者"，家庭设置里可退出）；`I-5` 原生
+tabBar/导航栏由 `theme/native-chrome.ts` 运行时按主题覆盖，文字色先过 AA 再上（不达标时沿明度
+调，保住品牌色色相）；`I-6` 下拉刷新会收尾；`I-7` 换家庭后记录页重载孩子缓存并按孩子过滤；
+`I-9` 提醒表单里有"停掉这个提醒"；`I-11` 孩子可编辑；`I-13` 补了 `pages/join/index` 落地页并
+注册进 `pages.json`，`VITE_INVITE_BASE_URL` 在 `.env.development` 给了默认值；`I-14` 二维码
+固定黑码白底。`endpoints.ts` 里剩下的零调用点函数只有 `remindersApi.occurrences`。
 
-11 条 Minor（终审 M-1…M-11，全部记账未修）：`M-1` access token 落盘（与 spec §5"仅内存"
-冲突，是有意取舍：冷启动免登录要能续，泄露的是 2h JWT 而非长期凭证）；`M-2` 加入成功后靠
-隐式回退选中家庭，没有显式 `switchFamily`；`M-3` `auto` 模式只在启动时读一次系统主题，
-没有 `onThemeChange` 监听；`M-4` 记录/提醒列表按**设备**时区分组，摘要按**账号**时区，
-跨时区家庭会串日；`M-5` `previewVisited` 永不清除，注册过的回访用户仍被标成"继续注册"；
-`M-6` `childStore.remove` 里的 `select(familyId,'')` 被成员检查拒绝，storage 留旧 id；
-`M-7` `reminder-list` / `notification-center` 在 `onLoad`+`onShow` 各拉一次，双份请求；
-`M-8` `usesCleartextTraffic: true` 写死且 BUILD.md 让运维保留，发行前应关掉；
-`M-9` 本地通知注册表只在动提醒时重建，冷启动不重建、逾期不补装；`M-10` H5 没有游客路由守卫，
-手输 `#/pages/home/index` 能进 tab 壳；`M-11` `http.ts` 用 `method as 'GET'` 绕过
-`@dcloudio/types` 没有 PATCH 的枚举（已作为真机风险记在 BUILD.md）。
+Minor：`M-2` 加入成功后显式 `switchFamily`；`M-3` `theme/system-theme.ts` 监听系统主题；
+`M-5` 注册成功清掉 `previewVisited`；`M-6` 移除孩子后删掉 storage 里的旧 id；`M-7` 列表页加
+`ready` 标记，首屏不再发双份请求；`M-9` 冷启动 `rearmLocalNotifications()` 重建排期；
+`M-4` 记录列表按天分组改走 `events/day-groups.ts`、提醒文案改走 `reminders/due-label.ts`，
+两处都按账号/提醒自己的时区算日子，与首页摘要一致。
+
+**验证时抓到的权限回归（已修）**：家庭设置把"归档此家庭"画给了 ADMIN、把改名输入框画给了
+MEMBER，邀请页把生成/撤销码画给了 MEMBER，而后端归档只认 OWNER、改名与发码只认 OWNER/ADMIN、
+列表任何成员可读。现在 `pages/__tests__/role-gates.test.ts` 把前后端两头的角色要求钉在同一张
+测试里。
+
+仍然欠着：`M-1` access token 落盘（有意取舍，见上）、`M-8` `usesCleartextTraffic: true`
+（发行前关）、`M-10` H5 游客深链无守卫、`M-11` `method as 'GET'`（真机风险记在 BUILD.md）。
 另有登录页双击提交会弹通用文案"操作失败，请稍后重试"——防抖的正常结果，提示语误导但不是缺陷。
 
 评审"放弃判断"的 5 条按现状定案：v1 保留归档入口（只加了实话文案与确认，`I-4` 缺位时它是

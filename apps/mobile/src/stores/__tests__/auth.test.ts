@@ -73,4 +73,28 @@ describe('auth store', () => {
     await store.bootstrap()
     expect(store.mustChangePassword).toBe(true)
   })
+
+  it('bootstrap 失败时若 refresh token 已被别的续期换掉，就不清会话', async () => {
+    uni.setStorageSync('refreshToken', 'rt-old')
+    ;(authApi.refresh as ReturnType<typeof vi.fn>).mockResolvedValue({
+      accessToken: 'at-new',
+      refreshToken: 'rt-new',
+    })
+    ;(meApi.get as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('网络错误'))
+    const store = useAuthStore()
+    await store.bootstrap()
+    // 服务端此时认的是 rt-new：清会话等于自己把用户登出（评审 C-3 的实测路径）。
+    expect(uni.getStorageSync('refreshToken')).toBe('rt-new')
+    expect(store.token).toBe('at-new')
+    expect(store.status).toBe('error')
+  })
+
+  it('bootstrap 失败且凭证没变（真的过期）时清空会话', async () => {
+    uni.setStorageSync('refreshToken', 'rt-old')
+    ;(authApi.refresh as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('登录已过期'))
+    const store = useAuthStore()
+    await store.bootstrap()
+    expect(store.token).toBeNull()
+    expect(uni.getStorageSync('refreshToken')).toBe('')
+  })
 })

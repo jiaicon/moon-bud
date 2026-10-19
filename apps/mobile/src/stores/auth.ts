@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import type { UserDto } from '@moonbud/shared'
-import { setAccessToken, setRefreshHandler } from '../api/http'
+import { renewAccessToken, setAccessToken, setRefreshHandler } from '../api/http'
 import { authApi, meApi } from '../api/endpoints'
 
 const REFRESH_TOKEN_KEY = 'refreshToken'
@@ -94,24 +94,25 @@ export const useAuthStore = defineStore('auth', {
     /** 冷启动静默登录。没有本地凭证就保持未登录，绝不报错（Review Focus 3）。 */
     async bootstrap(): Promise<void> {
       this.ensureRefreshHandler()
-      const refreshToken = readRefreshToken()
-      if (!refreshToken) {
+      const before = readRefreshToken()
+      if (!before) {
         this.status = 'idle'
         return
       }
       this.status = 'loading'
       try {
-        const tokens = await authApi.refresh(refreshToken)
-        uni.setStorageSync(REFRESH_TOKEN_KEY, tokens.refreshToken)
-        setAccessToken(tokens.accessToken)
-        this.token = tokens.accessToken
+        // 走 http 的 single-flight：页面请求这时也可能撞上 401 并发起同一次续期，
+        // 两条各自转发的路径里后到的那条会被服务端当成重放。
+        await renewAccessToken()
         const me = await meApi.get()
         this.user = me.user
         // 强制改密标记必须由 /me 恢复：登录响应早就随刷新丢了。
         this.mustChangePassword = me.mustChangePassword
         this.status = 'idle'
       } catch (err) {
-        this.clearSession()
+        // 只有凭证还是我这次拿到的那一张时才清：已经被别的续期换成新凭证的话，
+        // 服务端认的还是新的那张，清掉等于自己把自己登出。
+        if (readRefreshToken() === before) this.clearSession()
         this.fail(err)
       }
     },

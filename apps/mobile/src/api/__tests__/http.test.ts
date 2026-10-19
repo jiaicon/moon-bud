@@ -116,6 +116,74 @@ describe('apiRequest 的 401 续期', () => {
   })
 })
 
+describe('续期的 single-flight', () => {
+  const uniAny = globalThis as unknown as { uni: Record<string, unknown> }
+  const originalRequest = uniAny.uni.request
+
+  afterEach(() => {
+    uniAny.uni.request = originalRequest
+  })
+
+  it('两个并发 401 只续期一次（各转各的会让后到的那次把会话弄丢）', async () => {
+    const { apiRequest, setAccessToken, setRefreshHandler } = await import('../http')
+    setAccessToken('expired-at')
+    let calls = 0
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    setRefreshHandler(async () => {
+      calls += 1
+      await gate
+      return 'fresh-at'
+    })
+    uniAny.uni.request = vi.fn(
+      (opts: { header: Record<string, string>; success: (res: { statusCode: number; data: unknown }) => void }) => {
+        const ok = opts.header.Authorization === 'Bearer fresh-at'
+        opts.success(ok ? { statusCode: 200, data: { ok: true } } : { statusCode: 401, data: {} })
+      },
+    )
+
+    const first = apiRequest('/me')
+    const second = apiRequest('/families')
+    await Promise.resolve()
+    release()
+    await expect(first).resolves.toEqual({ ok: true })
+    await expect(second).resolves.toEqual({ ok: true })
+    expect(calls).toBe(1)
+    setAccessToken(null)
+  })
+
+  it('renewAccessToken 复用在飞的续期，前一次结束后下一次真的再发一轮', async () => {
+    const { renewAccessToken, setRefreshHandler } = await import('../http')
+    let calls = 0
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    setRefreshHandler(async () => {
+      calls += 1
+      await gate
+      return `at-${calls}`
+    })
+    const a = renewAccessToken()
+    const b = renewAccessToken()
+    release()
+    expect(await a).toBe('at-1')
+    expect(await b).toBe('at-1')
+    expect(calls).toBe(1)
+    await expect(renewAccessToken()).resolves.toBe('at-2')
+    expect(calls).toBe(2)
+  })
+
+  it('没有注册续期处理器时直接失败，而不是挂住', async () => {
+    vi.resetModules()
+    const { renewAccessToken } = await import('../http')
+    await expect(renewAccessToken()).rejects.toThrow(/登录凭证/)
+    vi.resetModules()
+  })
+})
+
 describe('baseURL 配置', () => {
   it('缺少 VITE_API_BASE_URL 时抛错，而不是回退到 localhost', async () => {
     vi.resetModules()

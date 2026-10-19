@@ -46,6 +46,29 @@ export function setRefreshHandler(fn: () => Promise<string>): void {
   refreshHandler = fn
 }
 
+let refreshing: Promise<string> | null = null
+
+/**
+ * 续期必须全局只有一次在进行：冷启动时 App.vue 的 bootstrap 和各页 onLoad 会同时撞上 401，
+ * 两边各发一次 /auth/refresh，服务端只认第一次旋转出来的新凭证，第二次是重放 ——
+ * 输的那一方会把自己的会话清掉，用户就莫名其妙回到登录页。
+ */
+export function renewAccessToken(): Promise<string> {
+  if (refreshing) return refreshing
+  if (!refreshHandler) return Promise.reject(new Error('本地没有登录凭证'))
+  const attempt = (async () => {
+    const fresh = await refreshHandler()
+    setAccessToken(fresh)
+    return fresh
+  })()
+  refreshing = attempt
+  const clear = () => {
+    if (refreshing === attempt) refreshing = null
+  }
+  attempt.then(clear, clear)
+  return attempt
+}
+
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const method = options.method ?? 'GET'
   const url = buildUrl(API_BASE_URL, path, options.query)
@@ -80,8 +103,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   // 用户看到的是"本地没有登录凭证"，完全无从下手。
   if (needsAuth && shouldRetryAfterRefresh(res.statusCode, false) && refreshHandler) {
     try {
-      const fresh = await refreshHandler()
-      setAccessToken(fresh)
+      const fresh = await renewAccessToken()
       const retry = await send(fresh)
       if (retry.statusCode >= 200 && retry.statusCode < 300) return retry.data as T
       throw normalizeError(retry)

@@ -121,6 +121,13 @@
 			}
 		},
 		{
+			// 统计图表从首页进入，不占底部 Tab 的第 5 格（那一格留给育儿知识）。
+			"path": "pages/stats/index",
+			"style": {
+				"navigationBarTitleText": "统计"
+			}
+		},
+		{
 			"path": "pages/profile/index",
 			"style": {
 				"navigationBarTitleText": "我的",

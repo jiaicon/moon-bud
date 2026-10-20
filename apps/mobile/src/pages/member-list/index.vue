@@ -47,16 +47,25 @@ function isSelf(member: MemberDto): boolean {
   return member.userId === authStore.user?.id
 }
 
+// 回前台那一趟（onShow）与"改完角色再拉一趟"是并发的，先出发的那份是旧名单。
+let loadSeq = 0
+
 async function load(): Promise<void> {
-  if (!familyId.value) return
+  const seq = ++loadSeq
+  const scopeFamilyId = familyId.value
+  if (!scopeFamilyId) return
   loading.value = true
   error.value = null
   try {
-    members.value = await membersApi.list(familyId.value)
+    const list = await membersApi.list(scopeFamilyId)
+    // 迟到的旧趟不能把刚改好的角色翻回去。
+    if (seq !== loadSeq) return
+    members.value = list
   } catch (err) {
+    if (seq !== loadSeq) return
     error.value = err instanceof Error ? err.message : '成员加载失败'
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 

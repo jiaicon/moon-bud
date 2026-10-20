@@ -4,6 +4,7 @@ const listMock = vi.hoisted(() => vi.fn())
 vi.mock('../../api/endpoints', () => ({ notificationsApi: { list: listMock } }))
 
 const { applyUnreadBadge, refreshUnreadTabBadge, REMINDER_TAB_INDEX } = await import('../tab-badge')
+const { setAccessToken } = await import('../../api/http')
 
 const calls: Array<{ kind: 'set' | 'remove'; arg: { index: number; text?: string } }> = []
 const g = globalThis as Record<string, any>
@@ -12,6 +13,8 @@ let restore: (() => void) | null = null
 beforeEach(() => {
   calls.length = 0
   listMock.mockReset()
+  // 问未读数要有会话（游客不该敲那扇门，见 notifications/unread.ts）：这里要测的是画角标。
+  setAccessToken('at-under-test')
   const before = g.uni
   g.uni = {
     ...before,
@@ -19,6 +22,7 @@ beforeEach(() => {
     removeTabBarBadge: (arg: { index: number }) => calls.push({ kind: 'remove', arg }),
   }
   restore = () => {
+    setAccessToken(null)
     g.uni = before
   }
 })

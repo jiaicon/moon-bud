@@ -32,10 +32,14 @@ describe('记录表单不会把用户填的东西丢掉', () => {
    * 3. UpdateEventDto 没有 childId，而全局 ValidationPipe 是 whitelist 且不禁额外字段：
    *    编辑时发过去的 childId 被丢掉，还是 200，界面写着"已更新"。要么别发，
    *    要么就得真的支持"把记录挪到另一个孩子"——那是另一件事。
+   *    保存现在走待同步出箱（submitUpdate/submitCreate），这条约束照样成立：
+   *    childId 只在创建那一路出现，编辑那一路只认 familyId + editingId。
    */
   it('编辑记录时不发 childId，PATCH 根本不收', () => {
-    expect(source).not.toMatch(/eventsApi\.update\([^)]*childId/)
-    expect(source).toMatch(/await eventsApi\.update\(familyId\.value, editingId\.value, shared\)/)
+    expect(source).not.toMatch(/submitUpdate\([^)]*childId/)
+    expect(source).toMatch(/outboxStore\.submitUpdate\(familyId\.value, editingId\.value, shared\)/)
+    // 创建这一路要带 childId（新建的记录得有归属）。
+    expect(source).toMatch(/submitCreate\(familyId\.value, \{ childId, \.\.\.shared \}\)/)
   })
 
   it('客户端的类型也不再声称记录可以换孩子', () => {

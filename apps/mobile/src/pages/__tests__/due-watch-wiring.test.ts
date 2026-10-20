@@ -9,6 +9,14 @@ describe('应用内"到点了"的接线', () => {
     expect(page('App.vue')).toMatch(/onShow\(\(\) => \{[\s\S]*startDueWatch\(\)[\s\S]*\}\)/)
   })
 
+  // 冷启动的静默登录对游客只会"什么都不做"，这时把轮询起起来是每分钟一发必定 401
+  // 的请求：一个没登录过的人的手机在替他后台敲门。
+  it('冷启动没有会话就不起轮询：静默登录之后要先问过 isLoggedIn', () => {
+    // 匹配到就是没守卫：bootstrap() 一落地就直接 startDueWatch()。
+    expect(page('App.vue')).not.toMatch(/bootstrap\(\)[\s\S]{0,120}?\.then\(\(\) => startDueWatch\(\)\)/)
+    expect(page('App.vue')).toMatch(/bootstrap\(\)[\s\S]{0,240}?isLoggedIn[\s\S]{0,80}?startDueWatch\(\)/)
+  })
+
   it('退到后台就停手：看不见屏幕时轮询只是白跑请求', () => {
     expect(page('App.vue')).toMatch(/onHide\(\(\) => \{[\s\S]*stopDueWatch\(\)[\s\S]*\}\)/)
   })

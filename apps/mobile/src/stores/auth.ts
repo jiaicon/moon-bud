@@ -7,6 +7,7 @@ import { clearLocalNotifications } from '../notifications/local-notify'
 import { resetDueWatch, startDueWatch } from '../notifications/due-watch'
 import { applyUnreadBadge, refreshUnreadTabBadge } from '../notifications/tab-badge'
 import { clearPreviewVisited } from '../utils/preview-visited'
+import { useOutboxStore } from './outbox'
 
 const REFRESH_TOKEN_KEY = 'refreshToken'
 
@@ -116,6 +117,10 @@ export const useAuthStore = defineStore('auth', {
       } catch {
         // 服务端撤销失败不影响本地登出：离线时也必须能退出。
       }
+      // 待同步属于"这个账号在这台机器上"：主动退出要连着这些没上传的记录一起清掉，
+      // 否则下一个人登录进来，会在自己手机上看到上一个账号的"待上传"，还可能把它们
+      // 真上传到自己的家庭里。（会话过期不走这里——那只是要重新登录，东西得留着。）
+      useOutboxStore().clear()
       this.clearSession()
     },
 
@@ -152,6 +157,12 @@ export const useAuthStore = defineStore('auth', {
         this.mustChangePassword = me.mustChangePassword
         this.status = 'idle'
       } catch (err) {
+        // 连不上服务器不等于凭证过期：清会话会把服务端还认的那张 refresh token 一起扔掉，
+        // 家长断网重开一次应用就得重新登录。留着会话，让页面自己说"没读到"。
+        if (err instanceof ApiRequestError && err.isNetworkError) {
+          this.fail(err)
+          return
+        }
         // 只有凭证还是我这次拿到的那一张时才清：已经被别的续期换成新凭证的话，
         // 服务端认的还是新的那张，清掉等于自己把自己登出。
         if (readRefreshToken() === before) this.clearSession()

@@ -19,12 +19,14 @@ import { useAuthStore } from '../../stores/auth'
 import { useChildStore } from '../../stores/child'
 import { useDupWindowStore } from '../../stores/dup-window'
 import { useFamilyStore } from '../../stores/family'
+import { useOutboxStore } from '../../stores/outbox'
 import { isoFromWallTime, wallFields } from '../../utils/wall-time'
 
 const familyStore = useFamilyStore()
 const childStore = useChildStore()
 const authStore = useAuthStore()
 const dupWindowStore = useDupWindowStore()
+const outboxStore = useOutboxStore()
 
 const type = ref<EventType | ''>('')
 const editingId = ref('')
@@ -233,11 +235,11 @@ async function onSubmit(): Promise<void> {
     if (editingId.value) {
       // PATCH 不收 childId：UpdateEventDto 里没有这个字段，whitelist 会静默丢掉它，
       // 发过去只会让"已更新"这句话撒一次谎。记录属于哪个孩子，打开编辑时就定死了。
-      await eventsApi.update(familyId.value, editingId.value, shared)
-      uni.showToast({ title: '已更新', icon: 'none' })
+      const res = await outboxStore.submitUpdate(familyId.value, editingId.value, shared)
+      uni.showToast({ title: queuedToast(res, '已更新'), icon: 'none' })
     } else {
-      await eventsApi.create(familyId.value, { childId, ...shared })
-      uni.showToast({ title: '已记录', icon: 'none' })
+      const res = await outboxStore.submitCreate(familyId.value, { childId, ...shared })
+      uni.showToast({ title: queuedToast(res, '已记录'), icon: 'none' })
     }
     setTimeout(() => uni.navigateBack(), 600)
   } catch (err) {
@@ -245,6 +247,14 @@ async function onSubmit(): Promise<void> {
   } finally {
     saving.value = false
   }
+}
+
+/**
+ * 离线时保存并没有真的存进服务端，界面绝不能说"已记录"——那会让人以为记好了、
+ * 关掉手机就不再管。说清"先存本机、恢复网络自动上传"，才是这条记录真实的处境。
+ */
+function queuedToast(res: { kind: 'saved' | 'queued' }, savedCopy: string): string {
+  return res.kind === 'queued' ? '已存到待同步，恢复网络后自动上传' : savedCopy
 }
 
 const goBack = () => uni.navigateBack()

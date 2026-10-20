@@ -58,11 +58,19 @@ const matrix = computed(() => {
   }
 })
 
+// 连着撤销两张码时，前一趟列表出发于后一次撤销之前，晚回来就把"已撤销"画回"剩 N 次"。
+let loadSeq = 0
+
 async function loadInvites(): Promise<void> {
-  if (!familyId.value) return
+  const seq = ++loadSeq
+  const scopeFamilyId = familyId.value
+  if (!scopeFamilyId) return
   try {
-    invites.value = await invitesApi.list(familyId.value)
+    const list = await invitesApi.list(scopeFamilyId)
+    if (seq !== loadSeq) return
+    invites.value = list
   } catch (err) {
+    if (seq !== loadSeq) return
     error.value = err instanceof Error ? err.message : '邀请列表加载失败'
   }
 }

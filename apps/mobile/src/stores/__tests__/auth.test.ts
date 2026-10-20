@@ -7,6 +7,7 @@ vi.mock('../../api/endpoints', () => ({
 }))
 
 import { authApi, meApi } from '../../api/endpoints'
+import { ApiRequestError } from '../../api/errors'
 import { apiRequest, setAccessToken } from '../../api/http'
 import { useAuthStore } from '../auth'
 
@@ -159,6 +160,22 @@ describe('auth store', () => {
     await store.bootstrap()
     expect(store.token).toBeNull()
     expect(uni.getStorageSync('refreshToken')).toBe('')
+  })
+
+  it('冷启动时只是连不上服务器，不许把用户登出', async () => {
+    // 离线不是凭证过期。把这两件事混掉，家长断网重开一次应用就要重新登录，
+    // 而那条 refresh token 服务端其实还认——清掉等于自己把自己踢出去。
+    uni.setStorageSync('refreshToken', 'rt-old')
+    setAccessToken(at)
+    ;(authApi.refresh as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new ApiRequestError('网络连接失败，请检查网络后重试', 0, true),
+    )
+    const store = useAuthStore()
+    await store.bootstrap()
+    expect(uni.getStorageSync('refreshToken')).toBe('rt-old')
+    expect(uni.getStorageSync('accessToken')).toBe(at)
+    // 但这一趟确实没成：状态要留在 error，页面才知道"还没读到用户"。
+    expect(store.status).toBe('error')
   })
 
   it('会话失效时清掉本地会话并带回欢迎页', () => {

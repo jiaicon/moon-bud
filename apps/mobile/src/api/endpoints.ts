@@ -32,6 +32,12 @@ export interface RegisterInput {
 }
 
 export interface EventCreateInput {
+  /**
+   * 客户端预生成的记录 id，只在离线出箱重放这条创建时带上：后端认它做幂等，
+   * 响应丢了再重放也不会多出第二条。在线新建也一律先定好这个 id 再发，
+   * 否则"失败后才补 id"补不出原来那一条（见 stores/outbox.ts 的 submitCreate）。
+   */
+  id?: string
   childId: string
   type: EventDto['type']
   occurredAt: string

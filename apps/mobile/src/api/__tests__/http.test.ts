@@ -272,6 +272,43 @@ describe('会话失效的出口', () => {
     await expect(apiRequest('/auth/login', { method: 'POST', auth: false })).rejects.toThrow(/登录/)
     expect(onExpired).not.toHaveBeenCalled()
   })
+
+  // 游客的冷启动：App 的 onShow 会问一次未读数，一个"本来就没登录的人"收到 401。
+  // 把这当成会话过期等于把他甩进"登录已过期 → 欢迎页 → onShow → 又 401"的死圈，
+  // 圈里的手势还会盖掉欢迎页按钮：点"重新登录"没有反应。
+  it('本地根本没有会话时的 401 不算会话失效：没登录过的人没有"过期"可言', async () => {
+    vi.resetModules()
+    const { apiRequest, setAccessToken, setRefreshHandler, setSessionExpiredHandler } = await import('../http')
+    const onExpired = vi.fn()
+    setSessionExpiredHandler(onExpired)
+    setAccessToken(null)
+    setRefreshHandler(async () => {
+      throw new Error('本地没有登录凭证')
+    })
+    uniAny.uni.request = always(401)
+
+    await expect(apiRequest('/notifications')).rejects.toThrow(/登录/)
+    expect(onExpired).not.toHaveBeenCalled()
+  })
+
+  it('会话救回来之后同样的 401 才算过期：门槛是"有没有会话"，不是"这次成没成功"', async () => {
+    vi.resetModules()
+    const { apiRequest, setAccessToken, setRefreshHandler, setSessionExpiredHandler } = await import('../http')
+    const onExpired = vi.fn()
+    setSessionExpiredHandler(onExpired)
+    setAccessToken(null)
+    setRefreshHandler(async () => {
+      throw new Error('本地没有登录凭证')
+    })
+    uniAny.uni.request = always(401)
+
+    await apiRequest('/notifications').catch(() => undefined)
+    expect(onExpired).not.toHaveBeenCalled()
+
+    setAccessToken('at')
+    await apiRequest('/notifications').catch(() => undefined)
+    expect(onExpired).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('baseURL 配置', () => {

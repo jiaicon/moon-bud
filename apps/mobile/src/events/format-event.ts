@@ -33,7 +33,11 @@ const named = (v: unknown) => {
   return key ? LABELS[key] ?? key : null
 }
 
-function detailOf(event: EventDto): string {
+/**
+ * 一条记录的"内容"摘要（不含类型名、不含时间）。列表用它拼一行，
+ * CSV 导出用同一份，两边念出来的才逐字一致。
+ */
+export function eventDetail(event: EventDto): string {
   const p = (event.payload ?? {}) as Payload
   const parts: string[] = []
 
@@ -119,7 +123,7 @@ function sleepMinutes(event: EventDto): number | null {
 
 /** 列表里一行的全部信息：类型 · 内容 · 多久以前。 */
 export function formatEventLine(event: EventDto, timezone: string, now?: Date): string {
-  const detail = detailOf(event)
+  const detail = eventDetail(event)
   const when = relativeTime(timezone, event.occurredAt, now)
   return [EVENT_TYPE_META[event.type].label, detail, when].filter(Boolean).join(' · ')
 }

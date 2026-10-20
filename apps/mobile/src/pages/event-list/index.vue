@@ -7,7 +7,9 @@ import { canModifyEvent, stageForEdit } from '../../events/event-edit'
 import { centerScrollLeft } from '../../events/chip-scroll'
 import { EVENT_TYPE_META } from '../../events/event-fields'
 import { groupByDay } from '../../events/day-groups'
-import { buildEventQuery, emptyListCopy, recorderOptions } from '../../events/list-filters'
+import { buildEventQuery, emptyListCopy, rangeBounds, RANGE_OPTIONS, recorderOptions, type EventRange } from '../../events/list-filters'
+import { csvFileName, exportCsv, saveCsv } from '../../events/csv-export'
+import { applyPendingUpdates, filterRows, pendingCreateRows, pendingDeletedIds } from '../../sync/pending-view'
 import { refreshUnreadTabBadge } from '../../notifications/tab-badge'
 import { formatEventLine } from '../../events/format-event'
 import { confirmDanger } from '../../utils/confirm'
@@ -16,12 +18,14 @@ import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useChildStore } from '../../stores/child'
 import { useFamilyStore } from '../../stores/family'
+import { useOutboxStore } from '../../stores/outbox'
 
 const PAGE_SIZE = 20
 
 const authStore = useAuthStore()
 const familyStore = useFamilyStore()
 const childStore = useChildStore()
+const outboxStore = useOutboxStore()
 
 const events = ref<EventDto[]>([])
 const total = ref(0)
@@ -31,6 +35,7 @@ const error = ref<string | null>(null)
 const typeFilter = ref<EventType | ''>('')
 const typeSheetOpen = ref(false)
 const recorderFilter = ref<string>('')
+const rangeFilter = ref<EventRange>('')
 /** 这一家的成员。空数组既可能是"只有我一个人"，也可能是"还没读到"，页面不替用户猜。 */
 const members = ref<MemberDto[]>([])
 const recorders = computed(() => recorderOptions(members.value, authStore.user?.id ?? ''))
@@ -63,12 +68,46 @@ const emptyCopy = computed(() =>
     recorderFilter.value
       ? recorders.value.find((o) => o.value === recorderFilter.value)?.label ?? '这个人'
       : '',
+    rangeFilter.value ? RANGE_OPTIONS.find((o) => o.value === rangeFilter.value)?.label ?? '' : '',
   ].filter(Boolean)),
 )
 
 /** 按天分组：家长回忆"那天下午"，不是"14:32 那条"。 */
 const timezone = computed(() => authStore.user?.timezone ?? 'Asia/Shanghai')
-const groups = computed(() => groupByDay(events.value, timezone.value))
+
+const sessionMeta = computed(() => ({
+  userId: authStore.user?.id ?? '',
+  nickname: authStore.user?.nickname ?? '',
+}))
+
+/** 本机已判定要删、只是没传上去的记录 id：这些要先从列表里藏起来，否则删了还在眼前。 */
+const pendingDeleted = computed(() => pendingDeletedIds(outboxStore.items, familyId.value))
+
+/** 待同步的创建投影成行，并套上和列表一致的筛项——待同步是状态，不是免检通行证。 */
+const pendingRows = computed(() =>
+  filterRows(pendingCreateRows(outboxStore.items, familyId.value, sessionMeta.value), {
+    type: typeFilter.value,
+    childId: childId.value,
+    createdBy: recorderFilter.value,
+    ...rangeBounds(rangeFilter.value, timezone.value),
+  }),
+)
+const pendingIds = computed(() => new Set(pendingRows.value.map((r) => r.id)))
+
+/** 服务端已有但被判为待删的先滤掉，编辑盖在行上，再并进来的创建，按发生时间倒序。 */
+const timelineEvents = computed(() => {
+  // 离线改一条记录，表单已经说"已存到待同步"，列表却还念服务器上的旧数字——
+  // 那一趟 PATCH 得盖上去，两页（列表与统计）才在算同一份数据。
+  const server = applyPendingUpdates(
+    events.value.filter((e) => !pendingDeleted.value.has(e.id)),
+    outboxStore.items,
+    familyId.value,
+  )
+  return [...pendingRows.value, ...server].sort(
+    (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime(),
+  )
+})
+const groups = computed(() => groupByDay(timelineEvents.value, timezone.value))
 
 async function run(reset: boolean): Promise<void> {
   if (!familyId.value) return
@@ -76,9 +115,10 @@ async function run(reset: boolean): Promise<void> {
   error.value = null
   const next = reset ? 1 : page.value + 1
   try {
+    const bounds = rangeBounds(rangeFilter.value, timezone.value)
     const res = await eventsApi.list(
       familyId.value,
-      buildEventQuery({ type: typeFilter.value, childId: childId.value, createdBy: recorderFilter.value }, next, PAGE_SIZE),
+      buildEventQuery({ type: typeFilter.value, childId: childId.value, createdBy: recorderFilter.value, ...bounds }, next, PAGE_SIZE),
     )
     events.value = reset ? res.items : [...events.value, ...res.items]
     total.value = res.total
@@ -123,6 +163,7 @@ async function loadMembers(): Promise<void> {
 let ready = false
 
 onLoad(async () => {
+  outboxStore.load()
   await familyStore.load()
   if (familyId.value) {
     await Promise.all([childStore.load(familyId.value), loadMembers()])
@@ -173,6 +214,64 @@ function pickRecorder(next: string) {
   if (recorderFilter.value === next) return
   recorderFilter.value = next
   void load(true)
+}
+
+function pickRange(next: EventRange) {
+  if (rangeFilter.value === next) return
+  rangeFilter.value = next
+  void load(true)
+}
+
+const exporting = ref(false)
+
+/** 当前筛项对应的查询条件（不含分页）——列表和导出必须用同一份，否则"导出当前"就名不副实。 */
+function currentFilters(): Parameters<typeof buildEventQuery>[0] {
+  return {
+    type: typeFilter.value,
+    childId: childId.value,
+    createdBy: recorderFilter.value,
+    ...rangeBounds(rangeFilter.value, timezone.value),
+  }
+}
+
+/**
+ * 导出的是"当前筛出来的这一份"，不是屏幕上滚到的那几页。所以按后端单页上限 100
+ * 一路翻到底，把 total 条取齐——用户筛"近 7 天 + 爷爷记的"再导出，拿到的就正好是那些。
+ */
+async function fetchAllMatching(): Promise<EventDto[]> {
+  const base = currentFilters()
+  const collected: EventDto[] = []
+  let page = 1
+  let total = Infinity
+  while (collected.length < total) {
+    const res = await eventsApi.list(familyId.value, buildEventQuery(base, page, 100))
+    collected.push(...res.items)
+    total = res.total
+    if (res.items.length === 0) break // 万一 total 与实页数对不上，也别死循环
+    page += 1
+  }
+  return collected
+}
+
+async function exportCurrent(): Promise<void> {
+  if (!familyId.value || exporting.value) return
+  exporting.value = true
+  uni.showLoading({ title: '正在导出…' })
+  try {
+    const events = await fetchAllMatching()
+    const name = csvFileName(
+      rangeFilter.value ? RANGE_OPTIONS.find((o) => o.value === rangeFilter.value)?.label ?? '' : '',
+      new Date(),
+      timezone.value,
+    )
+    saveCsv(name, exportCsv(events, children.value, timezone.value))
+    uni.showToast({ title: `已导出 ${events.length} 条`, icon: 'none' })
+  } catch (err) {
+    uni.showToast({ title: err instanceof Error ? err.message : '导出失败', icon: 'none' })
+  } finally {
+    uni.hideLoading()
+    exporting.value = false
+  }
 }
 
 /**
@@ -245,9 +344,22 @@ async function retryChildren(): Promise<void> {
   if (await childStore.load(familyId.value)) await load(true)
 }
 
+/** 点"待同步 N"手动催一趟：上传成功后重新拉列表，把那条从待同步换成服务端确认过的那份。 */
+async function retrySync(): Promise<void> {
+  if (outboxStore.flushing) return
+  await outboxStore.flush()
+  await load(true)
+}
+
 const myRole = computed(() => familyStore.currentFamily?.role ?? null)
 
 function editEvent(event: EventDto): void {
+  // 待同步的创建还没进服务端，后端也没有 GET /events/:id，编辑无从下手；
+  // 让它先同步上去，界面不假装能改一条还不存在的记录。
+  if (pendingIds.value.has(event.id)) {
+    uni.showToast({ title: '这条还在待同步，上传后才能编辑', icon: 'none' })
+    return
+  }
   if (!canModifyEvent(event, authStore.user?.id ?? null, myRole.value)) {
     uni.showToast({ title: '只有记这条的人或管理员能改', icon: 'none' })
     return
@@ -258,6 +370,13 @@ function editEvent(event: EventDto): void {
 }
 
 async function removeEvent(event: EventDto): Promise<void> {
+  // 撤掉一条还没上传的创建：直接把它从待同步里拿掉，就当没记过。
+  if (pendingIds.value.has(event.id)) {
+    const entry = outboxStore.items.find((i) => i.op === 'create' && i.eventId === event.id)
+    if (entry) outboxStore.removeEntry(entry.entryId)
+    uni.showToast({ title: '已从待同步里撤掉', icon: 'none' })
+    return
+  }
   if (!canModifyEvent(event, authStore.user?.id ?? null, myRole.value)) {
     uni.showToast({ title: '只有记这条的人或管理员能删', icon: 'none' })
     return
@@ -269,10 +388,12 @@ async function removeEvent(event: EventDto): Promise<void> {
   })
   if (!go) return
   try {
-    await eventsApi.remove(familyId.value, event.id)
+    const res = await outboxStore.submitDelete(familyId.value, event.id)
+    // 无论在线删除成功还是排进待同步，这一条都该立刻从眼前消失：
+    // 成功时本地把服务端那份拿掉，排队时靠 pendingDeleted 把它藏起来——两种都不该还说"已删除"。
     events.value = events.value.filter((e) => e.id !== event.id)
-    total.value = Math.max(0, total.value - 1)
-    uni.showToast({ title: '已删除', icon: 'none' })
+    if (res.kind === 'saved') total.value = Math.max(0, total.value - 1)
+    uni.showToast({ title: res.kind === 'queued' ? '已排到待同步，恢复网络后自动删除' : '已删除', icon: 'none' })
   } catch (err) {
     uni.showToast({ title: err instanceof Error ? err.message : '删除失败', icon: 'none' })
   }
@@ -339,6 +460,23 @@ async function removeEvent(event: EventDto): Promise<void> {
             </view>
           </view>
 
+          <!-- 时间范围：4 项一行放得下，不需要横滑。默认"全部"，选了才带 from/to。 -->
+          <view class="range-row">
+            <view
+              v-for="opt in RANGE_OPTIONS"
+              :key="opt.value"
+              class="chip"
+              :class="{ 'chip--active': rangeFilter === opt.value }"
+              @click="pickRange(opt.value)"
+            >
+              <text class="chip__label">{{ opt.label }}</text>
+            </view>
+            <!-- 导出贴在这一行末尾：它作用于"当前这套筛项"，放得越靠近筛项越不像另一回事。 -->
+            <view class="export" :class="{ 'export--busy': exporting }" @click="exportCurrent">
+              <text class="export__label">{{ exporting ? '导出中…' : '导出 CSV' }}</text>
+            </view>
+          </view>
+
           <scroll-view
             v-if="children.length > 1"
             id="child-chips"
@@ -385,17 +523,30 @@ async function removeEvent(event: EventDto): Promise<void> {
           </scroll-view>
         </view>
 
+        <!-- 待同步横幅：有几条压在本机等上传，就把它摆在列表最上面，并给一条手动催的出口。 -->
+        <view
+          v-if="outboxStore.pendingCount"
+          class="pending"
+          :class="{ 'pending--busy': outboxStore.flushing }"
+          @click="retrySync"
+        >
+          <text class="pending__text">
+            {{ outboxStore.flushing ? '正在同步…' : `待同步 ${outboxStore.pendingCount} 条 · 点此重试` }}
+          </text>
+        </view>
+
         <text v-if="error" class="timeline__error">{{ error }}</text>
 
         <view v-for="group in groups" :key="group.key" class="group">
           <text class="group__label">{{ group.label }}</text>
-          <view v-for="event in group.items" :key="event.id" class="card">
+          <view v-for="event in group.items" :key="event.id" class="card" :class="{ 'card--pending': pendingIds.has(event.id) }">
             <view class="card__main" @click="editEvent(event)">
               <text class="card__line">{{ formatEventLine(event, timezone) }}</text>
-              <text class="card__who">{{ event.createdByNickname }} 记 · 点此编辑</text>
+              <text v-if="pendingIds.has(event.id)" class="card__who">还在本机 · 恢复网络后自动上传</text>
+              <text v-else class="card__who">{{ event.createdByNickname }} 记 · 点此编辑</text>
             </view>
             <view class="card__delete" @click="removeEvent(event)">
-              <text class="card__delete-label">删除</text>
+              <text class="card__delete-label">{{ pendingIds.has(event.id) ? '撤掉' : '删除' }}</text>
             </view>
           </view>
         </view>
@@ -465,6 +616,33 @@ async function removeEvent(event: EventDto): Promise<void> {
   flex-direction: row;
   align-items: center;
   gap: 12rpx;
+}
+
+.range-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.export {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 10rpx 22rpx;
+  border-radius: 999rpx;
+  border: 1rpx solid var(--mb-color-border);
+  background-color: var(--mb-color-surface);
+}
+
+.export--busy {
+  opacity: 0.6;
+}
+
+.export__label {
+  white-space: nowrap;
+  font-size: 24rpx;
+  color: var(--mb-color-text-primary);
 }
 
 .chips {
@@ -560,6 +738,22 @@ async function removeEvent(event: EventDto): Promise<void> {
   color: var(--mb-color-error);
 }
 
+.pending {
+  padding: 16rpx 24rpx;
+  border-radius: 16rpx;
+  background-color: var(--mb-color-surface-alt);
+  border-left: 6rpx solid var(--mb-color-warning);
+}
+
+.pending--busy {
+  opacity: 0.6;
+}
+
+.pending__text {
+  font-size: 24rpx;
+  color: var(--mb-color-text-primary);
+}
+
 .group {
   display: flex;
   flex-direction: column;
@@ -581,6 +775,12 @@ async function removeEvent(event: EventDto): Promise<void> {
   padding: 24rpx;
   border-radius: 20rpx;
   background-color: var(--mb-color-surface);
+}
+
+/* 待同步的行要看得出来"还没进云端"：虚线边框 + 略淡，一眼区分于已上传的实心卡片。 */
+.card--pending {
+  border: 2rpx dashed var(--mb-color-border);
+  background-color: var(--mb-color-surface-alt);
 }
 
 .card__main {

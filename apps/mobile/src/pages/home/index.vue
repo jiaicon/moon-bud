@@ -115,6 +115,7 @@ const goReminders = () => uni.switchTab({ url: '/pages/reminder-list/index' })
 const goChildForm = () => uni.navigateTo({ url: '/pages/child-form/index' })
 const goFamilySelect = () => uni.navigateTo({ url: '/pages/family-select/index' })
 const goEvent = (type: string) => uni.navigateTo({ url: `/pages/event-form/index?type=${type}` })
+const goStats = () => uni.navigateTo({ url: '/pages/stats/index' })
 const rowIcon = (key: string) =>
   EVENT_TYPE_META[key as keyof typeof EVENT_TYPE_META].icon
 
@@ -193,6 +194,10 @@ const overdueCount = computed(() => summary.value?.overdueCount ?? 0)
             <text class="grid__icon">{{ EVENT_TYPE_META[type].icon }}</text>
             <text class="grid__label">{{ EVENT_TYPE_META[type].label }}</text>
           </view>
+        </view>
+
+        <view class="stats-entry" @click="goStats">
+          <text class="stats-entry__label">📊 看趋势 / 生长曲线</text>
         </view>
       </template>
     </view>
@@ -338,5 +343,20 @@ const overdueCount = computed(() => summary.value?.overdueCount ?? 0)
 .btn__label {
   font-size: 30rpx;
   color: var(--mb-color-on-primary);
+}
+
+.stats-entry {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24rpx;
+  border-radius: 20rpx;
+  border: 1rpx solid var(--mb-color-border);
+  background-color: var(--mb-color-surface);
+}
+
+.stats-entry__label {
+  font-size: 28rpx;
+  color: var(--mb-color-text-primary);
 }
 </style>

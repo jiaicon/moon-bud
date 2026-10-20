@@ -93,6 +93,9 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const method = options.method ?? 'GET'
   const url = buildUrl(API_BASE_URL, path, options.query)
   const needsAuth = options.auth !== false
+  // "这次请求有没有带会话"要在发出前问：并发里别的请求可能在我们等待期间续好期，
+  // 事后再读会把一个游客说成有过期会话。
+  const hadSession = needsAuth && getAccessToken() !== null
 
   const send = (token: string | null) =>
     new Promise<{ statusCode: number; data: unknown }>((resolve, reject) => {
@@ -127,15 +130,17 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       const fresh = await renewAccessToken()
       const retry = await send(fresh)
       if (retry.statusCode >= 200 && retry.statusCode < 300) return retry.data as T
-      if (retry.statusCode === 401) reportSessionExpired()
+      // 报"过期"的门槛是本地到底有没有会话：游客的一次 401 不是过期，
+      // 报了就等于把他甩进"欢迎页 → onShow → 又 401"的死圈。
+      if (retry.statusCode === 401 && hadSession) reportSessionExpired()
       throw normalizeError(retry)
     } catch (err) {
       if (err instanceof ApiRequestError) throw err
-      reportSessionExpired()
+      if (hadSession) reportSessionExpired()
       throw normalizeError(err)
     }
   }
 
-  if (needsAuth && res.statusCode === 401) reportSessionExpired()
+  if (needsAuth && res.statusCode === 401 && hadSession) reportSessionExpired()
   throw normalizeError(res)
 }

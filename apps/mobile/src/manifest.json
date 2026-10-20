@@ -1,7 +1,9 @@
 {
     "name" : "月芽",
-    // 占位符：云打包会直接拒绝这个值。必须换成自己在 DCloud 开发者中心申请的 appid（见 BUILD.md）。
-    "appid" : "__UNI__MOONBUD",
+    // DCloud 开发者中心为该账号申请的 appid（不是密钥，但它决定云打包产出的是哪个包）。
+    // 换账号的人要在 HBuilderX 里双击本文件的"基础配置"→appid 右侧"重新获取"，
+    // 带着占位符 __UNI__MOONBUD 提交云打包会被直接拒绝（见 BUILD.md 第 2 节）。
+    "appid" : "__UNI__9B2D760",
     "description" : "一家人一起记，孩子的一天看得见",
     "versionName" : "1.0.0",
     "versionCode" : "100",
@@ -18,7 +20,14 @@
             "delay" : 0
         },
         /* 模块配置 */
-        "modules" : {},
+        "modules" : {
+            // 本地通知（plus.push.createMessage / clear）由 push 模块提供。
+            // 没勾它，真机上每次排期都会抛"打包时未添加push模块"（客户端已把这句吞成一条日志，
+            // 但提醒就只剩站内提醒中心和应用内到点提示了）。
+            // 只声明模块、不配 sdkConfigs.push.unipush：我们要的是本机定时通知，
+            // 不接个推/厂商通道，省掉 uni-push 后台开通那一堆配置。
+            "Push" : {}
+        },
         /* 应用发布信息 */
         "distribute" : {
             /* android打包配置 */
@@ -47,9 +56,43 @@
                 ]
             },
             /* ios打包配置 */
-            "ios" : {},
+            "ios" : {
+                "dSYMs" : false
+            },
             /* SDK配置 */
-            "sdkConfigs" : {}
+            "sdkConfigs" : {},
+            "icons" : {
+                "android" : {
+                    "hdpi" : "unpackage/res/icons/72x72.png",
+                    "xhdpi" : "unpackage/res/icons/96x96.png",
+                    "xxhdpi" : "unpackage/res/icons/144x144.png",
+                    "xxxhdpi" : "unpackage/res/icons/192x192.png"
+                },
+                "ios" : {
+                    "appstore" : "unpackage/res/icons/1024x1024.png",
+                    "ipad" : {
+                        "app" : "unpackage/res/icons/76x76.png",
+                        "app@2x" : "unpackage/res/icons/152x152.png",
+                        "notification" : "unpackage/res/icons/20x20.png",
+                        "notification@2x" : "unpackage/res/icons/40x40.png",
+                        "proapp@2x" : "unpackage/res/icons/167x167.png",
+                        "settings" : "unpackage/res/icons/29x29.png",
+                        "settings@2x" : "unpackage/res/icons/58x58.png",
+                        "spotlight" : "unpackage/res/icons/40x40.png",
+                        "spotlight@2x" : "unpackage/res/icons/80x80.png"
+                    },
+                    "iphone" : {
+                        "app@2x" : "unpackage/res/icons/120x120.png",
+                        "app@3x" : "unpackage/res/icons/180x180.png",
+                        "notification@2x" : "unpackage/res/icons/40x40.png",
+                        "notification@3x" : "unpackage/res/icons/60x60.png",
+                        "settings@2x" : "unpackage/res/icons/58x58.png",
+                        "settings@3x" : "unpackage/res/icons/87x87.png",
+                        "spotlight@2x" : "unpackage/res/icons/80x80.png",
+                        "spotlight@3x" : "unpackage/res/icons/120x120.png"
+                    }
+                }
+            }
         }
     },
     /* 快应用特有相关 */
@@ -71,8 +114,8 @@
     "mp-toutiao" : {
         "usingComponents" : true
     },
-    "uniStatistics": {  
-        "enable": false
+    "uniStatistics" : {
+        "enable" : false
     },
     "vueVersion" : "3"
 }

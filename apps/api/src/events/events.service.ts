@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
 import type { Child, Event, FamilyRole, Prisma } from '@prisma/client'
 import {
   validateEventPayload,
@@ -46,20 +46,34 @@ export class EventsService {
     assertNoteOrThrow(dto.note)
     assertIntervalOrThrow(dto.occurredAt, dto.endedAt)
 
-    const event = await this.prisma.event.create({
-      data: {
-        childId: dto.childId,
-        familyId,
-        type: dto.type,
-        occurredAt: new Date(dto.occurredAt),
-        endedAt: dto.endedAt ? new Date(dto.endedAt) : null,
-        payload: payload as Prisma.InputJsonValue,
-        note: dto.note ?? null,
-        createdBy: userId,
-      },
-      include: INCLUDE_CREATOR,
-    })
-    return toEventDto(event)
+    const data = {
+      ...(dto.id ? { id: dto.id } : {}),
+      childId: dto.childId,
+      familyId,
+      type: dto.type,
+      occurredAt: new Date(dto.occurredAt),
+      endedAt: dto.endedAt ? new Date(dto.endedAt) : null,
+      payload: payload as Prisma.InputJsonValue,
+      note: dto.note ?? null,
+      createdBy: userId,
+    }
+
+    try {
+      const event = await this.prisma.event.create({ data, include: INCLUDE_CREATOR })
+      return toEventDto(event)
+    } catch (err) {
+      // 客户端自带 id 的重放：这条已经在库里。只认本家庭、未删的那一条，
+      // 原样返回它（幂等）；别拿这个口子把别人家的记录读出来或盖掉。
+      if (dto.id && isUniqueViolation(err)) {
+        const existing = await this.prisma.event.findFirst({
+          where: { id: dto.id, familyId, deletedAt: null },
+          include: INCLUDE_CREATOR,
+        })
+        if (existing) return toEventDto(existing)
+        throw new ConflictException('该记录 id 已被占用')
+      }
+      throw err
+    }
   }
 
   async findAll(familyId: string, query: QueryEventsDto): Promise<Paginated<EventDto>> {
@@ -233,6 +247,13 @@ function validatePayloadOrThrow(type: EventType, payload: unknown): EventPayload
     throw new BadRequestException(result.errors)
   }
   return result.data
+}
+
+/** Prisma 唯一约束冲突（P2002）。幂等创建要靠它区分"这条已经在库里"和真错误。 */
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2002'
+  )
 }
 
 function assertNoteOrThrow(note: string | undefined): void {

@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common'
+import { randomUUID } from 'node:crypto'
 import request from 'supertest'
 import { createTestApp, resetDatabase } from './utils/db'
 import { PrismaService } from '../src/prisma/prisma.service'
@@ -70,6 +71,56 @@ describe('记录', () => {
     expect(res.body.createdByNickname).toBe('ev_me1')
     expect(res.body.note).toBe('喝得很快')
     expect(res.body.endedAt).toBeNull()
+  })
+
+  describe('幂等创建（离线重放不重复）', () => {
+    it('带同一个客户端 id 重放两次，库里只有一条、两次返回同一条', async () => {
+      const client = randomUUID()
+      const body = {
+        id: client,
+        childId,
+        type: 'feeding',
+        occurredAt: '2026-10-16T02:00:00.000Z',
+        payload: { method: 'bottle', amountMl: 120 },
+      }
+      const first = await post(body).expect(201)
+      const second = await post(body).expect(201)
+      expect(first.body.id).toBe(client)
+      expect(second.body.id).toBe(client)
+      expect(await prisma.event.count({ where: { id: client } })).toBe(1)
+    })
+
+    it('不带 id 的创建照旧各自生成新 id（回归）', async () => {
+      const a = await post({ childId, type: 'sleep', occurredAt: '2026-10-16T02:00:00.000Z', payload: {} }).expect(201)
+      const b = await post({ childId, type: 'sleep', occurredAt: '2026-10-16T02:00:00.000Z', payload: {} }).expect(201)
+      expect(a.body.id).not.toBe(b.body.id)
+      expect(await prisma.event.count({ where: { familyId } })).toBe(2)
+    })
+
+    it('拿别家已存在的记录 id 来创建：既不覆盖别家那条，也不把它读出来', async () => {
+      // other 在自己的家庭里建一条，把它的 id 冒充进来。
+      const of = await request(app.getHttpServer())
+        .post('/api/families')
+        .set('Authorization', `Bearer ${other.token}`)
+        .send({ name: 'G' })
+        .expect(201)
+      const oc = await request(app.getHttpServer())
+        .post(`/api/families/${of.body.id}/children`)
+        .set('Authorization', `Bearer ${other.token}`)
+        .send({ name: '别人家', gender: 'UNKNOWN', birthday: '2026-01-01' })
+        .expect(201)
+      const foreign = await request(app.getHttpServer())
+        .post(`/api/families/${of.body.id}/events`)
+        .set('Authorization', `Bearer ${other.token}`)
+        .send({ childId: oc.body.id, type: 'feeding', occurredAt: '2026-10-16T02:00:00.000Z', payload: { method: 'bottle', amountMl: 1 } })
+        .expect(201)
+
+      // 用那个 id 往自己家里建：撞唯一约束 → 该拒绝，且别家那条原样不动、不被本家庭读出。
+      await post({ id: foreign.body.id, childId, type: 'feeding', occurredAt: '2026-10-16T02:00:00.000Z', payload: { method: 'bottle', amountMl: 999 } })
+        .expect(409)
+      expect(await prisma.event.findUnique({ where: { id: foreign.body.id } })).toMatchObject({ familyId: of.body.id })
+      expect(await prisma.event.count({ where: { familyId } })).toBe(0)
+    })
   })
 
   it('拒绝 payload 多带未知字段', async () => {

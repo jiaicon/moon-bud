@@ -6,19 +6,34 @@ import { applyUnreadBadge } from '../../notifications/tab-badge'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import ThemeSwitcher from '../../components/ThemeSwitcher.vue'
 import { useAuthStore } from '../../stores/auth'
+import { useDupWindowStore } from '../../stores/dup-window'
 import { useFamilyStore } from '../../stores/family'
+import { confirmDanger } from '../../utils/confirm'
 import { pickerOptions, timezoneLabel, type TimezoneOption } from '../../utils/timezone-options'
 
 const authStore = useAuthStore()
 const familyStore = useFamilyStore()
+const dup = useDupWindowStore()
 
 const unread = ref<number | null>(null)
 
-/** 这一行的数字与 tabBar 角标必须念同一个数，也念成同一个样子。 */
-const unreadLabel = computed(() => (unread.value === null ? '' : unread.value > 99 ? '99+' : String(unread.value)))
+/** 这一行的数字与 tabBar 角标必须念同一个数，也念成同一个样子：没有未读时两处都不出声。 */
+const unreadLabel = computed(() => {
+  if (unread.value === null || unread.value <= 0) return ''
+  return unread.value > 99 ? '99+' : String(unread.value)
+})
 
 const user = computed(() => authStore.user)
 const familyName = computed(() => familyStore.currentFamily?.name ?? '还没有家庭')
+
+/** 只有一个家庭时，"切换家庭"是个假入口，别摆出来。 */
+const canSwitchFamily = computed(() => familyStore.families.length > 1)
+
+/** 这一行要说得出本机改过几类，否则点了才知道有覆盖在生效。 */
+const dupLabel = computed(() => {
+  const at = Object.keys(dup.overrides).length
+  return at ? `已改 ${at} 类` : '默认'
+})
 
 const timezoneOptions = computed<TimezoneOption[]>(() => pickerOptions(user.value?.timezone ?? ''))
 const timezoneIndex = computed(() => {
@@ -51,11 +66,21 @@ async function refreshUnread(): Promise<void> {
 }
 
 async function logout(): Promise<void> {
+  // 退出会把这台手机排好的推送和还没上传上去的记录一起清掉，一次点击不该就走掉。
+  const ok = await confirmDanger({
+    title: '退出登录',
+    content: '退出后这台手机不再收到这个家的提醒推送，本机还没同步上去的记录也会一起清掉。',
+    confirmText: '退出',
+  })
+  if (!ok) return
   await authStore.logout()
   uni.reLaunch({ url: '/pages/welcome/index' })
 }
 
-const go = (path: string) => () => uni.navigateTo({ url: path })
+/** 必须是"点了就跳"的那一种：`@click="go('/x')"` 拿到的是表达式的返回值，柯里工厂造出来的函数没人去调。 */
+const go = (path: string) => {
+  uni.navigateTo({ url: path })
+}
 
 onShow(() => void refreshUnread())
 onPullDownRefresh(() => {
@@ -82,12 +107,26 @@ onPullDownRefresh(() => {
         <view class="card">
           <theme-switcher />
         </view>
+        <view class="row" @click="go('/pages/theme-settings/index')">
+          <text class="row__label">主题设置</text>
+          <text class="row__chevron">›</text>
+        </view>
       </view>
 
       <view class="section">
-        <text class="section__title">记录</text>
+        <text class="section__title">提醒</text>
         <view class="row" @click="go('/pages/dup-window-settings/index')">
           <text class="row__label">重复提醒提示</text>
+          <view class="row__left">
+            <text class="row__value">{{ dupLabel }}</text>
+            <text class="row__chevron">›</text>
+          </view>
+        </view>
+        <view class="row" @click="go('/pages/notification-center/index')">
+          <view class="row__left">
+            <text class="row__label">提醒中心</text>
+            <text v-if="unreadLabel" class="badge"><text class="badge__label">{{ unreadLabel }}</text></text>
+          </view>
           <text class="row__chevron">›</text>
         </view>
       </view>
@@ -106,8 +145,11 @@ onPullDownRefresh(() => {
           <text class="row__label">邀请家人</text>
           <text class="row__chevron">›</text>
         </view>
-        <view class="row" @click="go('/pages/theme-settings/index')">
-          <text class="row__label">主题设置</text>
+        <view v-if="canSwitchFamily" class="row" @click="go('/pages/family-select/index')">
+          <view class="row__left">
+            <text class="row__label">切换家庭</text>
+            <text class="row__value">{{ familyName }}</text>
+          </view>
           <text class="row__chevron">›</text>
         </view>
       </view>
@@ -126,13 +168,6 @@ onPullDownRefresh(() => {
         <text class="hint">改的是这些钟点读给谁看。已记下的时刻不变，已排好的提醒也在原来那一刻响——在新时区里看，它们会写成别的钟点。</text>
         <view class="row" @click="go('/pages/change-password/index')">
           <text class="row__label">修改密码</text>
-          <text class="row__chevron">›</text>
-        </view>
-        <view class="row" @click="go('/pages/notification-center/index')">
-          <view class="row__left">
-            <text class="row__label">提醒中心</text>
-            <text v-if="unreadLabel" class="badge"><text class="badge__label">{{ unreadLabel }}</text></text>
-          </view>
           <text class="row__chevron">›</text>
         </view>
       </view>

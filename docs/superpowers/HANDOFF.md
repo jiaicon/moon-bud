@@ -448,7 +448,286 @@ overrides)`（非正数的脏覆盖按没设处理，回落默认）。`stores/d
 那要改 13 个 spec 的调用点，而假红既然不可复现，就不值得为它扩大改动面、引入新的回归风险。
 真机（Android）相关的待验证项见下节。
 
+### 2026-10-20（周二）（九）：记录页能按日期区间筛了（#50，补上 spec §9 最后一个筛项）
+
+§9 的四个筛项（类型 / 孩子 / 记录人 / 日期区间）到这里补齐。后端 `QueryEventsDto` 早就有
+`from`/`to`/`until`，`EventsService.findAll` 按 `occurredAt: { gte: from, lte: min(to,until) }`
+（两端都含）过滤，所以这次**纯客户端接线**，没动 API。
+
+**为什么用预设 chip 而不是原始日历对**：spec 的反目标是"任何操作 ≤3 步"，一对自由日期选择器
+要点两次、各自滚日历、再确认，远超预算。改成四个固定档（全部 / 今天 / 近 7 天 / 近 30 天），
+点一下就出结果。空档 `''` 表示"不限区间"，此时请求不带 `from`/`to`。
+
+**边界必须算在账号时区，不是设备本地**——这是全项目一致的规则，也是 DST 陷阱的老窝。
+`rangeBounds(range, timezone, now)`：起点 = 账号时区里 `(今天 - (天数-1))` 那天的 `00:00`，
+终点 = 账号时区里"明天 00:00"这个时刻再减 1 毫秒（即今天 23:59:59.999，含）。
+"今天"用 `dayKeyIn` 取账号时区的日号，往前平移到 `isoFromWallTime` 落成时刻。
+上海账号在 UTC+8 下，"今天"= `2026-10-19T16:00Z ~ 2026-10-20T15:59:59.999Z`，跨过 DST 的
+纽约账号同一天则是 `2026-10-19T04:00Z ~ 2026-10-20T03:59:59.999Z`——用例锁死了这两种。
+
+改动：`events/list-filters.ts` 加 `EventRange`/`RANGE_OPTIONS`/`rangeBounds`，`buildEventQuery`
+透传 `from`/`to`；`pages/event-list/index.vue` 在类型筛选条下面加一行 `.range-row` chip，
+`pickRange` 切档即 `load(true)`；空状态文案带上当前区间名。
+
+验证：新用例 `rangeBounds`（空档/今天/7天/30天/纽约 DST）+ 源门禁用例
+`event-list-range.test.ts`（断言 `.vue` 真的把 `rangeBounds(rangeFilter.value, timezone.value)`、
+`...bounds`、`RANGE_OPTIONS` 循环、`pickRange`、空状态区间名写进去了）。**RED 见证**：
+`git show HEAD:...event-list/index.vue | grep -c 'rangeBounds\|RANGE_OPTIONS\|pickRange'` = 0，
+实现前源门禁必红。移动全量 vitest **62 文件 / 419 用例全绿**（原 408，+11），`vue-tsc --noEmit` 干净。
+H5 真跑：搭一次性 QA 家庭（4 条喂药回填 0/3/10/40 天），抓 XHR 出站 URL 实测
+`近7天 → from=2026-10-13T16:00Z&to=2026-10-20T15:59:59.999Z`、`今天 → from=2026-10-19T16:00Z…`、
+`全部 → 不带 from/to`，计数 4/1/2/3 与预期一致。验完已删该 QA 家庭、孤儿用户、
+`.qa-range-*` 脚手架与浏览器 auth 键。
+
+### 2026-10-20（周二）（十）：家庭记录能导出成 CSV 了（#51，用户本轮点进来的一条新功能）
+
+后端没有导出端点，也不必加：`findAll` 本就按筛项返回分页记录，导出是**纯客户端**把
+"当前这套筛项命中的全部记录"拉齐、拼成 CSV、交给系统落地。
+
+**导出的是"当前筛选"，不是屏幕上那几页**。列表按 20 条一页滚动加载，导出若只喂已加载的
+那页就会悄悄少数据。`event-list/index.vue` 的 `fetchAllMatching()` 复用与列表**同一份**筛项来源
+`currentFilters()`（类型/孩子/记录人/区间），按后端单页上限 100 一路翻到 `total` 取齐；
+`res.items.length===0` 兜一条 break，防 total 与实页数对不上时死循环。
+
+**CSV 核心是可单测的纯函数**（`events/csv-export.ts`，不碰网络不碰下载）：
+- 列 = `时间,孩子,类型,详情,记录人,备注`；`详情`直接复用列表那套 `eventDetail`（我把 `format-event.ts`
+  里的私有 `detailOf` 提成导出函数），两边念出来的内容逐字一致。
+- 时间按**账号时区**（`wallStamp`），不是设备本地——与全项目一致，也是 DST 老坑；上海 09:30 vs
+  洛杉矶 18:30 同一时刻，用例钉死。对不上号的孩子写"未知孩子"而非留空（留空会被当成"这条本来没孩子"）。
+- **RFC 4180 转义**：字段含逗号/双引号/换行就整字段裹引号、内部引号翻倍；行分隔 CRLF。
+- **前置 UTF-8 BOM**：否则 Excel 认不出 UTF-8、中文直接花屏。⚠️ 这个 BOM 在编辑器/Write 里会被当
+  不可见字符吞掉——源码里必须写 `''` 转义，别打真字符。
+
+**落地分平台，各整块条件编译**（`saveCsv`，理由同 `local-notify.ts`：鸿蒙无 plus，运行时 `typeof`
+挡不住编译期对 plus 的引用）：H5 走 `Blob`+`<a download>`（浏览器自弹，成功不言自明）；App 走
+`plus.io` 写 `_doc/` 再 `plus.runtime.openFile` 交给系统选择器。注：`plus.share` 的"文件"类型这套
+`@dcloudio/types` 里不支持（`PlusShareShareMessage` 无 `files`），故用 openFile。
+
+验证：新纯函数用例 8 条（表头/时区/未知孩子/RFC4180 转义/空表仍出表头/BOM/文件名两档）
++ 源门禁 `event-list-export.test.ts` 3 条（翻满 total、exportCurrent 串起 csvFileName+exportCsv+saveCsv、
+导出中挡重复点）。**RED 见证**：实现前 `csv-export` 模块不存在，import 即红；BOM 那条先红后绿。
+移动全量 vitest **64 文件 / 430 用例全绿**（原 62/419，+11），`vue-tsc --noEmit` 干净，`build:h5` DONE。
+H5 真跑：登录一次性 QA 家庭（2 孩子 6 记录，含带逗号的孩子名与"引号+逗号+换行"的备注），
+捕下 `createObjectURL` 的 Blob 实测——字节头 `EF BB BF`（BOM 在，`blob.text()` 会按规范吞掉要读
+`arrayBuffer` 才看得见）、CRLF 分行、时间按 Asia/Shanghai、备注里那对引号变 `""` 整字段被引号裹住；
+点"近 7 天"再导出从 4 条（全部、且当前孩子=小满）收到 3 条，证明导出真按当前筛项走。验完删该家庭+
+孤儿用户+`.qa-csv-*` 脚手架+浏览器 auth 键。**App 端导出落盘那条待真机**（见下）。
+
+### 2026-10-20（周二）（十一）：离线写入队列 / 弱网重试（#52）
+
+**要解决的**：4G 进电梯、哄睡时单手记一条喂奶却赶上弱网，从前请求一失败记录就没了——用户看到
+一句红字，手上哄着孩子，只能重头填。这一版把"记下了"与"上传了"拆开：写操作先落到本机出箱队列，
+列表里立刻画出这条（并诚实标注"还在本机"），网络回来自动补传，全程幂等不重复。
+
+**幂等是这件事的地基，先做在后端（#52a）**。断网重放最坏的情形是"请求其实到了、响应没回来"，
+客户端不知道就再发一次——奶量因此记两遍。所以 `CreateEventDto` 加可选 `id`（`@IsUUID`，客户端
+预生成 v4），`events.service.ts` 的 `create()`：带 id 且撞 `P2002` 时，去库里找那条**同族、未删**
+的同 id 记录原样返回（重放=同一 201、库里仍只有一条），而非盲目报错；不带 id 走原路各自生成。
+**别人家的同 id 记录既不覆盖也不读出**：`findFirst` 作用域锁死 `familyId`，命中不了就抛
+`ConflictException('该记录 id 已被占用')`——不泄露那条存在与否，也挡住跨族写。e2e 三条钉死
+（同 id 重放 total=1 / 无 id 各生成 / 拿别家 id 来创建 409 且自家 total=0）。
+
+**客户端拆成三块纯逻辑 + 一个 store**（都能脱离 uni 单测）：
+- `sync/uuid.ts`：`crypto.getRandomValues` 造 v4（版本位 4、变体位 8/9/a/b），无 WebCrypto 回落
+  `Math.random`。测试查形状 + 500 个不重复。
+- `sync/outbox.ts` + `stores/outbox.ts` 的 `stepFor`：**只在网络错误时入队**（服务端 4xx/5xx 是
+  真错误，重试无意义且会骚扰，照旧抛给表单报错）。重放 FIFO，逐条 `replay`，成功出队；失败按
+  `stepFor` 分流——网络错误 `halt-offline`（**不烧 attempts**，整轮停下等下次）、永久错误 `retry-later`
+  （attempts+1 留给下次）、`attempts≥8` 或**入队超 7 天**则 `drop` 并 toast "有一条记录一直没同步上，
+  已放弃"。绝不把离线失败计入 attempts，否则一次长断网回来队列会被误判"试够了"而丢掉。
+- `sync/pending-view.ts`：把出箱里的 create 项投影成列表认识的 `EventDto[]`（`createdBy` 记成本账号、
+  时间取 `enqueuedAt`、脏项缺 `childId/type/occurredAt` 就跳过），并给出 delete 项的 id 集合。
+
+**列表把"待同步行"与服务端行并成一时间线**（`event-list/index.vue`）：`pendingRows` 过同一套
+`filterRows`（类型/孩子/记录人/区间），与服务端 `events`（剔除 `pendingDeleted` 里的 id）合并、按
+`occurredAt` 倒序分组。待同步行有 `.card--pending` 样式、谁行写"还在本机 · 恢复网络后自动上传"、
+删除按钮念"撤掉"（本地 `removeEntry`，不碰网络）；点它是编辑会被挡并提示"这条还在待同步，上传后才
+能编辑"（PATCH 需要真实服务端 id）。顶部横幅"待同步 N 条 · 点此重试"点开即手动 `flush`。
+
+**触发时机**：`App.onShow` 回前台、`onNetworkStatusChange` 转联网各 `flush()` 一次；列表 `onLoad` 先
+`outbox.load()`（顺带 `isStale` 清掉过期项）。**登出清空队列**（`auth.logout` 调 `outbox.clear()`，
+主动退出即丢弃上一账号的待同步写）；**会话过期不走这条**——被踢回欢迎页不该顺手丢掉用户没传完的记录。
+
+**表单接线**（`event-form/index.vue`）：create/update/delete 全改走 `outboxStore.submit*`，返回
+`{kind:'saved'|'queued'}`；`queuedToast` 把"已记录/已更新/已删除"在排队时换成"已存到待同步，恢复网络后
+自动上传/删除"。UI 说的和数据库里发生的一致，这是全项目一致的"界面不许说谎"。
+
+验证：新增纯逻辑/ store / 接线源闸用例，移动全量 vitest **69 文件 / 464 用例全绿**，`vue-tsc --noEmit`
+干净；`events.e2e` **19/19**（含幂等 3 条）。RED 都亲眼见过：`sync/outbox`·`uuid`·`pending-view` 模块
+先 "Failed to load url"；`outbox-policy` "放太久该丢" 用默认 `enqueuedAt` 先假绿、改成 `enqueuedAt:1`
+才见到红；`event-form-no-silent-drop` 源闸改指 `submitUpdate/submitCreate` 前不成立。
+**H5 全程实证**（一次性 QA 家庭 `qa_off_1792459525`）：
+① 关后端→记一条喂奶：出"待同步 1 条"横幅 + 列表画诚实待同步行；回开后端→**该记录按客户端 UUID
+恰好落库一次**（`total=1`、id 即预生成那张），无重复。② 再关后端→删那条已同步记录：行消失、横幅仍在、
+storage 里躺着 1 条 delete 项；回开后端→delete 补传，**服务端 total 归 0**、队列清空、UI 回空状态。
+create 与 delete 两条写路径的"离线排队→联网幂等补传"都跑通了。
+
+**仍待真机**：App 侧 `flush` 依赖 `onNetworkStatusChange`/`onShow` 在 Android 上如实触发，H5 里这两个
+回调只是近似；出箱落 storage 的持久性（进程被系统杀后再起仍在）也只有真机能证。
+
+### 2026-10-20（周二）（十二）：基础统计图表（#53）+ 游客不再被 401 甩进死圈
+
+**统计页**（`pages/stats/index.vue`，从首页"📊 看趋势 / 生长曲线"进入，不占底部 Tab 第 5 格）：
+两个纯模块 + 一层薄接线。
+- `stats/daily.ts`：按**账号时区**的日 key 把记录归进固定长度（7/30）的桶，没有记录的日子留占位
+  而不是跳过——柱子会自己缩窄，用户看不出"这天空着"和"我没拉到"。指标 5 个：喂奶次数 / 奶量
+  （`payload.amountMl` 求和）/ 睡眠次数 / 睡眠时长（只有 `endedAt>occurredAt` 的睡眠计入，缺结束
+  时间就是不知道，不猜）/ 尿布次数。
+- `stats/growth.ts`：从 `growth` 记录里抽体重/身高/头围，按时间升序出点；`valueExtent` 给纵轴留
+  10% 余量，单值时按 `abs*0.1||1` 撑开，全零不退化成一个点。点数 ≥2 画折线 + 圆点，恰好 1 个只画
+  点并写"只量过一次，暂无趋势"，0 个走空状态文案"还没有头围记录，去记录页加一条生长发育"。
+- 诚实规矩照旧：读失败说"失败了"（顶部错误行），不拿 0 冒充"没记录"；每条 metric 的窗口内全空才
+  出"近 N 天没有…记录"。底部固定留一句"统计只含已同步到服务器的记录。"——待同步行不进图，这是
+  现状而不是 bug，写在界面上。
+- 取数是**一次把该孩子全部记录拉齐**（100 条一页翻到底），生长曲线要全量、每日只用窗口，同一份
+  数据不多打后端。
+
+验证：新增 `stats/__tests__`（daily 10 / growth 8 / 接线源闸 4），移动全量 vitest
+**73 文件 / 493 用例全绿**，`vue-tsc --noEmit` 干净，`build:h5` 通过。
+**H5 实证**（一次性 QA 账号 + 22 条种子记录，跑完已连根删掉）：7 天窗口画 7 根柱（14 号那天空着
+仍是占位柱）、30 天窗口 30 根且最老一根刻度落在"9 月 21 日"；切指标时奶量/睡眠分钟/尿布各归各桶
+（`睡眠时长` 只在有 `endedAt` 的 4 天出数）；折线 5 点等距升幕（`12,100 → 288,20`）；切"头围"没有
+记录就走空文案；深链接 `#/pages/stats/index` 刷新后仍在统计页（静默重登没被误判成"会话过期"）。
+截图取不到（浏览器 MCP 的视口是 hidden，`take_screenshot` 拒绝），证据是 DOM 结构 + 文本快照。
+
+**终审（fresh reviewer）改掉的两条，都已 RED→GREEN**：
+- **翻页取数按 id 去重**（`stats/daily.ts` 新增 `uniqueById`，页面取齐后过一遍）：服务端分页是
+  skip/take + 固定倒序，就在这一趟里别的家长记了一条，行号整体位移，同一条会在两页各出现一次
+  （或被顶掉）——"今天喂了几次 / 一共多少 ml"当场翻倍。用例：`uniqueById` 3 条（含"计数不翻倍"）。
+- **图只在该有数的时候画**（模板次序反转）：原来空文案是 `v-if="!error && !loading && !hasDaily"`、
+  图是它的 `v-else`，于是**首屏就失败**时 `!error` 把文案挡掉、`v-else` 照样画出满屏 0 高柱子——
+  那是"这七天什么都没记"的样子，而真相是"我没读到"。现在 `v-if="hasDaily"` 画图、
+  `v-else-if="!error && !loading"` 才念空文案，生长那一栏同样反转（`v-if="growthPoints.length"`）。
+  源闸 `stats-wiring` 原来断言的是那条旧条件，属于"测了个太弱的约束"，一并改成钉新次序。
+- 另修 `shiftDayKey` 注释里的"UTC 正午"（实际全程用 UTC 字段，不涉及夏令时挪到邻日）。
+- **终审确认没问题**：游客修复没有把真过期会话的路子堵掉（`hadSession` 读的是 `getAccessToken()`，
+  它会回落到 storage，所以"上次会话存过 token"仍算有会话）；时区/跨月跨年切日正确；全空窗口走空
+  文案而不是零柱；翻页循环能终止（空页 break）。
+- **实测补上失败路径**：把 storage 里的 accessToken 换成过期串、refreshToken 清空后深链接刷新 →
+  页面只有 2 发有界请求（`/families`、`/children` 各一次 401），界面写"孩子名单没加载出来 ·
+  本地没有登录凭证 · 重试"，**0 根柱子、0 条空文案**——失败没被画成"没有"。
+
+**顺带挖出并修掉的真 bug（游客冷启动死圈）**：游客冷启动会**每 3 秒一发 401 并点不动"重新登录"**。
+现场抓到的调用链：`onAppEnterForeground` → `App.onShow` → `refreshUnreadTabBadge()`（无 `isLoggedIn`
+守卫）→ `GET /notifications` 401 → 本地没有 refresh token → 续期失败 → `reportSessionExpired()` →
+`clearSession()` 里的 `setAccessToken(null)` 把 `sessionExpiredReported` 复位 → `reLaunch welcome?expired`
+→ 下一次前台又是 `onShow`。圈里的 reLaunch 还会盖掉用户的手势，所以按钮"点了没反应"。
+- `api/http.ts`：报"会话过期"的门槛从"这发请求 401 了"改成**"本地到底有没有会话"**
+  （`hadSession = needsAuth && getAccessToken() !== null`，在发请求之前问，避免并发续期把游客说成有过期
+  会话）。一个没登录过的人没有"过期"可言。
+- `notifications/unread.ts`：没有会话就直接返回 `null`（"不知道"），一个字都不问——问了只会换来 401
+  和一次敲门。这条同时管住首页/记录页/提醒页/通知中心/我的页五个调用点。
+- `App.vue`：`onLaunch` 的 `bootstrap().then(startDueWatch)` 原来无条件起轮询，游客手机上等于每分钟
+  后台敲一次门；现在与 `onShow` 一样先问 `isLoggedIn`。
+- 回归方向也钉住：真过期的会话照旧恰好通知一次（新用例"本地根本没有会话时的 401 不算会话失效" +
+  "会话救回来之后同样的 401 才算过期"）。
+- 真机实证：清 storage 冷启动 → **0 发 xhr**、停在欢迎页；随后真实登录、进统计页、深链接刷新全部正常。
+
+**遗留（未动，属判断不属缺陷）**：
+- **已经读到过一次数据后**的后台刷新失败，页面留着上一次成功读到的数字并在顶部说"失败了"——和记录页
+  同一套写法（`events` 只在成功时覆写，失败分支不清数据）。首屏就失败已经不会画假图了，但"错误行 +
+  旧数字"仍可能让人误信那些数是此刻的。要收紧就是给旧数据挂一个"截至 X 时"的标签。
+- 待同步（离线还没传上去）的记录不进统计，界面上那句 caveat 已把这件事说在前面。
+- 统计取的是该孩子**全部**历史（生长曲线要全量），7 天视图也一并把全量拉回来；记录上千条以后该改成
+  两段取数（窗口一段、生长一段）。
+
+改完之后复跑：移动全量 **73 文件 / 496 用例全绿**，`vue-tsc --noEmit` 干净，`build:h5` 通过。
+
+### 2026-10-20（周二）（十三）：全量复测 + 又收掉两处"过期响应覆盖当前内容"
+
+按要求先跑一遍全量，再专门找隐藏问题。
+
+**全量闸门（改动前基线与改动后各自跑过一次）**：
+- 移动 vitest：改前 **73 文件 / 496**、改后 **75 文件 / 503** 全绿。
+- `vue-tsc --noEmit` 退出 0；`build:h5` DONE（只剩 uview-pro 的 sass 弃用告警与 rrule 的
+  `default` 导出告警，历史既有）。
+- API e2e 全量 `npx jest --config test/jest-e2e.json --runInBand`：**15 套件 / 145 用例全绿**
+  （members 这次不作首套件红——#49 的修正在全量顺序下成立）。
+
+**H5 实证（一次性 QA 账号，24 条种子记录，跑完连根删掉：`families` 3→2、`events` 29→5、`users` 6→5）**：
+游客清 storage 冷启动 → **0 发 xhr**（上一轮的游客修复成立）；登录 → 首页/统计/成员全部正常：
+大宝 7 根柱（14~17 号为空占位）、切二宝后只有 18/昨天/今天三根有数、生长栏念"还没有体重记录"；
+`#/pages/member-list/index` 深链接刷新后显示"1 位家人 · raceQA · 创建者"，整趟前台无 console 报错。
+
+**挖到的隐藏问题：同一类 bug 在两个页面上还留着**（"过期响应覆盖当前内容"，首页 #30 与记录页
+的串行队列早就治过）：
+- **统计页**：取数比首页慢得多（一个孩子要翻好几页才取齐），而双胞胎家庭里"点哥哥看一眼马上点弟弟"
+  是最自然的动作。旧趟（哥哥，6 页）会在后趟（弟弟，1 页）之后落地，于是**顶上的名字是弟弟、柱子是
+  哥哥的数**，没有任何异样可看。顺带一个更隐蔽的：翻页循环原来每翻一页都现读 `familyId/childId`，
+  中途换孩子会把两个孩子的页拼成一份两边都不像的数据。
+- **成员页**：回前台那一趟 `load()` 与"改完角色再拉一趟"并发，先出发的那份拿的是改动前的名单，
+  落地更晚就会**把刚改好的角色在屏幕上翻回原样**，而 toast 已经说过"已更新"。
+- 修法照首页：每趟开头 `const seq = ++loadSeq`，写数据/写 error 之前确认自己还是最新那次，
+  `loading` 只由最新那次收尾；作用域在开头定死。两处各自 `stats-stale-response` / `member-list-stale-response`
+  源闸先 RED（4/4、3/3）后 GREEN。
+- **查过确认没问题**：记录页/提醒页/通知中心都有 `let queue` 串行链（后一次一定真跑且按序落地）；
+  游客路径上 `onShow` 的三个调用点——`refreshUnreadTabBadge`（`unread.ts` 内守卫）、
+  `resyncActiveReminderSchedules`（`if (!authStore.user) return`，且 bootstrap 无 refresh token 时不发请求）、
+  出箱 `flush` 与 `startDueWatch`（`isLoggedIn` 守卫）——都不发请求；`pageSize=100` 正好卡在服务端
+  `MAX_PAGE_SIZE=100` 以内；`uniqueById` 保留先见的一份，翻页期间被编辑的记录至多读到一个稍旧的值，
+  不会重复计数。
+- 顺手删掉 `App.vue` 里没用到的 `resetDueWatch` 导入（真正的调用点在 `auth.clearSession`，有源闸看着）。
+
+**仍留着（属判断不属缺陷，与（十二）一致）**：统计页"读到过一次后后台刷新失败"仍是"旧数字 + 一行
+错误"；离线待同步行不进统计；7 天视图仍把该孩子全量拉回（上千条后改两段取数）；
+`invite-qrcode` 的 `loadInvites` 没有过期响应守卫——那一页只有 onLoad 与点按钮后的串行重拉，
+触发不了并发，先不动。
+
+### 2026-10-20（周二）（十四）：（十三）留下的四条隐患全部收掉，另治一处"断网冷启动把人已登出"
+
+按"存在的问题都处理一下"逐个清账，清完再补闸门与实证。
+
+**1. `invite-qrcode` 补过期响应守卫**（（十三）里判为"触发不了并发、先不动"，这一轮仍按同一形状统一掉）：
+`loadInvites` 开头 `const seq = ++loadSeq`，写 `invites`/`error` 前确认自己仍是最新一次。源闸
+`invite-qrcode-stale-response`（3 用例）先 RED 后 GREEN。成本：如果以后那页出现别的并发入口，
+现在已经有 token 可用。
+
+**2. 统计页"旧数字 + 一行报错"不再冒充现状**：记住最近一次**成功读到**的时刻 `loadedAt`，失败且手上
+仍有旧数时念"下面这些是 今天 09:30 读到的，之后没能再刷新成现在的"。时刻按账号时区落，跨日说"几月几日"、
+当日说"今天"——新增纯函数 `readAtLabel(timezone, loadedAtMs, now)`（`daily.test` 3 用例，含 UTC 与
+Asia/Shanghai 同一瞬间落到不同日期的对照）。闸门 `stats-wiring` 里"刷新失败但手上还有旧数字"一条。
+
+**3. 7 天视图不再把全量历史拉回来**：改成两段取数并 `Promise.all`——柱子按 `rangeBounds('7d'|'30d', 时区)`
+只取窗口内，生长曲线仍取全量（`type=growth` 记录本来就少，家长一月称一次重，窗口一窄就只剩一两个点）。
+切窗口要重走一趟（`pickWindow` 里判等后 `void runLoad()`）。取数循环抽成 `fetchPages(scopeFamilyId, filters)`，
+作用域仍在开头定死。闸门 `stats-window-fetch`（4 用例）+ `stats-stale-response` 跟着改钉形。
+
+**4. 待同步（离线还没传上去）的记录现在进统计**：统计聚合读的是 `statsEvents`——服务端的先藏掉待删、
+盖上新增/编辑（新纯函数 `applyPendingUpdates`，PATCH 语义：请求体没带的字段保留服务器值，显式 `null`
+才清），再并上待同步的创建（只按孩子筛），最后 `uniqueById`。记录页 `timelineEvents` 用同一个函数，
+两页才算同一份数据；口径文案也重写了——"统计只含已同步到服务器的记录"在并进取数后就是假话，现在说
+"本机上还有 N 条没传上去的记录，已经一并算进上面的图里；传成功后数字不会变"，没有待同步行时改说
+"这些数字来自服务器上已保存的记录，只统计 X 一个人"。统计页 `onLoad` 补 `outboxStore.load()`
+（不先读回本地队列就永远看不到待同步）。`pending-view` 加 5 用例（覆盖/保留/清空/不凭空造行/不改写入参）、
+`offline-wiring` 加记录页那条、`stats-wiring` 加两闸门。
+
+**5. 顺带挖到的真 bug：冷启动时服务器连不上 = 用户被登出。** 实证过程中断网刷新页面，回来后发现
+`accessToken`/`refreshToken` 都被清空、被踢成未登录。根因在 `auth.runBootstrap`：它每次冷启动主动
+`renewAccessToken()`，失败就按"凭证没变→真的过期"清会话——**但它没区分"服务端拒了这张凭证"和
+"根本没连上服务端"**。断网重开一次应用，服务端其实还认那张 refresh token，客户端自己把它扔了，
+家长只能重新登录。修法：`err instanceof ApiRequestError && err.isNetworkError` 时只 `fail(err)`
+不清会话，页面照常念"没读到"。RED：`auth store > 冷启动时只是连不上服务器，不许把用户登出`
+（expected '' to be 'rt-old'）→ GREEN；既有"凭证没变（真的过期）时清空会话"不动，两条并存。
+
+**闸门**：移动 vitest **77 文件 / 522** 全绿（本轮 +2 文件、+19 用例）；`vue-tsc --noEmit` 退出 0；
+`build:h5` DONE；API e2e 全量 **15 套件 / 145 用例全绿**（本轮只动客户端与文档，仍复跑确认）。
+
+**H5 实证（一次性 QA 账号 + 一个家庭一个孩子，跑完整根删掉：`events` 8→6、`families` 归零该测试家庭、
+`users` 里 `qa_stats_%` 归零）**：真把 API 进程停掉复现离线路径——
+① 离线记一条喂奶 150ml → 排队成功，恢复网络后统计"喂奶次数 今天=2"、"奶量 今天=250"（服务器 100 + 本机 150），
+口径念"本机上还有 1 条没传上去…"；点"待同步 1 条"后队列归零、同一屏数字仍是 2/250、口径回到
+"这些数字来自服务器上已保存的记录"。② 列表已加载后断网编辑那条 100ml→80ml：列表立刻显示 80ml
+（服务器还是 100），恢复后重放成功、服务器变 80，统计"奶量 今天=230"。③ 断网期间冷启动刷新：
+`accessToken` 与 `refreshToken` 这次都留着（修复前同一动作把两者清空）。
+游客清 storage 冷启动仍 **0 发 xhr**，浏览器最后停在欢迎页。
+
+**仍然没做的判断**：统计页离线冷启动仍会先卡在"孩子名单没加载出来"（孩子列表要读服务端，没有它就没法
+按孩子定作用域）——这是诚实的，但"本机有 3 条待同步却一个数都看不到"的场景仍然存在；真要治得让孩子
+名单也落到本地缓存，属另一件事。
+
 ### 待真机验证（本地跑不了，非缺陷）
+
+
 
 这些只能在装了系统的 Android 设备/HBuilderX 出包上验，H5 里 `plus.*` 是 no-op：
 - **本地定时通知**：`plus.push.createMessage` 在 App 完全关闭时是否按排期点响；重复提醒
@@ -457,6 +736,11 @@ overrides)`（非正数的脏覆盖按没设处理，回落默认）。`stores/d
   生效、切主题即时刷新、AA 文字对比度在实屏上成立。
 - **防重复提示的输入体验**：`dup-window-settings` 的原生 `<picker>` 在真机滚轮上选"默认/分钟"
   的落值，与 H5 用 `setStorageSync` 绕过选择器验证的差距。
+- **导出 CSV 的 App 落地**：`csv-export.ts` 的 `saveCsvInApp`（写 `_doc/` + `plus.runtime.openFile`
+  交系统选择器）只在真机出包上才谈得上生效，H5 里是 no-op；H5 那条 `Blob`+`<a download>` 已实测。
+- **离线出箱队列的自动补传**：`App.onShow` / `onNetworkStatusChange` 触发 `outbox.flush()` 在
+  Android 上是否如实、及时触发，以及进程被系统回收后 storage 里的待同步项是否原样还在（H5 已实证
+  create+delete 两条路径的排队与幂等补传，见上（十一））。
 
 ### 踩过的坑，下次直接避开
 - **`apps/api` 的常驻服务是 `node apps/api/dist/main.js`，改 `src` 不会生效。**

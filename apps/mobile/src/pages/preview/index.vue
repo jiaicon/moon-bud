@@ -139,6 +139,7 @@ const go = (url: string) => uni.navigateTo({ url })
   display: flex;
   flex-direction: column;
   gap: 8rpx;
+  min-width: 0;
 }
 
 .preview__title {
@@ -154,6 +155,7 @@ const go = (url: string) => uni.navigateTo({ url })
 }
 
 .preview__login {
+  flex-shrink: 0;
   padding: 10rpx 24rpx;
   border-radius: 999rpx;
   border: 2rpx solid var(--mb-color-border);
@@ -161,6 +163,7 @@ const go = (url: string) => uni.navigateTo({ url })
 
 .preview__login-label {
   font-size: 24rpx;
+  white-space: nowrap;
   color: var(--mb-color-primary);
 }
 

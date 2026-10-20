@@ -7,9 +7,15 @@ import type { ReminderType } from './api-types'
 // 又不保证合成具名导出。因此取 RRule 必须同时兼容"具名"和"default 上取属性"两种形态——
 // 只写其中一种，另一端就会在加载时报 "No matching export for import default"。
 type RRuleCtor = typeof import('rrule').RRule
-const RRule: RRuleCtor =
-  (rruleNs as { RRule?: RRuleCtor }).RRule ??
-  (rruleNs as { default?: { RRule: RRuleCtor } }).default!.RRule
+
+// 读取绕一层函数，而不是在模块顶层直接写 rruleNs.default：打包器（rollup）只看 rrule 的
+// ESM 入口，那里确实没有 default，于是每次构建都吼一句 `"default" is not exported`，
+// 而这一行本来只是给 CJS/Node-ESM 那条路兜底的。值与求值顺序都没变。
+function pickRRule(mod: { RRule?: RRuleCtor; default?: { RRule: RRuleCtor } }): RRuleCtor {
+  return mod.RRule ?? mod.default!.RRule
+}
+
+const RRule: RRuleCtor = pickRRule(rruleNs)
 
 /**
  * 时区处理的关键：RRULE 的 BYHOUR 指的是"墙上时间"（当地几点），

@@ -71,8 +71,13 @@ dfb9ee4 feat(api): add member management with last-owner invariant
    新增全局配置必须加在这里。
 5. **`enableImplicitConversion` 全局关闭**，数字/布尔查询参数一律显式
    `@Type`/`@Transform`；否则查询串里的 `false` 会变成 `true`。
-6. **`@moonbud/shared` 的 rrule 必须用默认导入**（`import rrulePkg from 'rrule'`）。
-   纯 CJS 包，具名导入会让 ESM 产物在真实 Node 里加载失败，而 Vitest 抓不到。
+6. **`@moonbud/shared` 取 rrule 的构造函数必须兼容多种形态**（现在是
+   `packages/shared/src/reminder-recurrence.ts` 里的 `pickRRule(rruleNs)`：
+   先读具名 `RRule`，再退回 `default.RRule`）。rrule 是 UMD 包：CJS 入口只有 default，
+   打包器走的 ESM 入口只有具名，Node 的 ESM 加载器又不保证合成具名导出——只写一种，
+   另一端会在加载时报 "No matching export for import default"。**这层读取不要写回模块顶层的
+   `rruleNs.default`**：rollup 只看 ESM 入口，每次都吼一句 `"default" is not exported`，
+   绕进函数里读同一个值就不吼了（2026-10-20 为此改过一次，为的是让构建输出干净）。
 7. **鉴权失败一律 401，不是 400。** 失效 refresh token 返回 401。
 8. **家庭作用域权限只在 `FamilyMemberGuard` 一处实现**；非成员与不存在的家庭
    都返回 **403**（不用 404，避免探测家庭是否存在）；归档家庭一律拒绝。

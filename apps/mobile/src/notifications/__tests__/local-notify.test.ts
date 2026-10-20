@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { armReminders, clearLocalNotifications, disarmReminder, rearmLocalNotifications, SCHEDULE_KEY } from '../local-notify'
 import type { ArmableReminder } from '../local-notify'
 
@@ -150,5 +150,56 @@ describe('本地排期表', () => {
     for (const row of after) expect(row.at).toBeGreaterThan(Date.now())
     expect(allRows().some((r) => r.title === '旧版一次性')).toBe(false)
     vi.useRealTimers()
+  })
+})
+
+// 真机上装的云打包 APK 若没包含 push 模块，plus.push.clear/createMessage 会抛
+// "打包时未添加push模块，请参考…"。这句话既不该出现在家长面前，也不该让"新建提醒"整个失败：
+// 站内提醒中心和应用内的到点提示都不依赖原生 push。
+describe('APK 未打包 push 模块', () => {
+  const plus = (globalThis as unknown as { plus: { push: { clear: () => void; createMessage: () => void } } }).plus
+  let native: typeof import('../local-notify')
+
+  beforeEach(async () => {
+    vi.resetModules()
+    native = await import('../local-notify')
+    plus.push.clear = () => {
+      throw new Error('打包时未添加push模块')
+    }
+    plus.push.createMessage = plus.push.clear
+  })
+
+  afterEach(() => {
+    plus.push.clear = () => {}
+    plus.push.createMessage = () => {}
+  })
+
+  const rows = () => {
+    const stored = uni.getStorageSync(native.SCHEDULE_KEY)
+    return stored && typeof stored === 'object' ? Object.values(stored) : []
+  }
+
+  it('排期不抛错，登记表照常写', () => {
+    expect(() => native.armReminders('f1', [daily('a')], ['f1'], NOW)).not.toThrow()
+    expect(rows().length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('撤销与退出登录也不抛错，表照样清空', () => {
+    native.armReminders('f1', [daily('a')], ['f1'], NOW)
+    expect(() => native.disarmReminder('a')).not.toThrow()
+    expect(rows().length).toBe(0)
+    native.armReminders('f1', [daily('b')], ['f1'], NOW)
+    expect(() => native.clearLocalNotifications()).not.toThrow()
+    expect(rows().length).toBe(0)
+  })
+
+  it('只在第一次说一遍，不每次重算都刷屏', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    native.armReminders('f1', [daily('a')], ['f1'], NOW)
+    native.armReminders('f1', [daily('b')], ['f1'], NOW)
+    native.rearmLocalNotifications()
+    const pushWarns = warn.mock.calls.filter((args) => String(args[0]).includes('push'))
+    expect(pushWarns.length).toBe(1)
+    warn.mockRestore()
   })
 })

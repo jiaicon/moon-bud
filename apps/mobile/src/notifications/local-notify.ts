@@ -45,15 +45,42 @@ function readScheduled(): Record<string, ScheduledRow> {
 function rescheduleAll(scheduled: Record<string, ScheduledRow>): void {
   uni.setStorageSync(SCHEDULE_KEY, scheduled)
   // #ifdef APP-PLUS
-  plus.push.clear()
-  for (const record of Object.values(scheduled)) {
-    if (record.at <= Date.now()) continue
-    plus.push.createMessage(record.body, JSON.stringify({ id: record.owner }), {
-      title: record.title,
-      when: new Date(record.at),
-    })
+  try {
+    plus.push.clear()
+    for (const record of Object.values(scheduled)) {
+      if (record.at <= Date.now()) continue
+      plus.push.createMessage(record.body, JSON.stringify({ id: record.owner }), {
+        title: record.title,
+        when: new Date(record.at),
+      })
+    }
+  } catch (e) {
+    warnNativePushUnavailable(e)
   }
   // #endif
+}
+
+function clearNativePush(): void {
+  // #ifdef APP-PLUS
+  try {
+    plus.push.clear()
+  } catch (e) {
+    warnNativePushUnavailable(e)
+  }
+  // #endif
+}
+
+/**
+ * APK 里没有 push 模块时，plus.push 的每个调用都会抛"打包时未添加push模块"。
+ * 那句话对家长毫无意义，而且它原本会把"新建提醒"整条链路炸断 —— 登记表已经写成了，
+ * 站内提醒中心与应用内的到点提示都不依赖原生 push，所以这里只吞下并留一条日志，
+ * 且只说一次（每次重算都喊一遍就成了刷屏）。
+ */
+let nativePushWarned = false
+function warnNativePushUnavailable(e: unknown): void {
+  if (nativePushWarned) return
+  nativePushWarned = true
+  console.warn('[moonBud] 本机 APK 未包含 push 模块，本地通知不可用；提醒仍走站内提醒中心与应用内到点提示', e)
 }
 
 /**
@@ -136,7 +163,5 @@ export function rearmLocalNotifications(): void {
  */
 export function clearLocalNotifications(): void {
   uni.removeStorageSync(SCHEDULE_KEY)
-  // #ifdef APP-PLUS
-  plus.push.clear()
-  // #endif
+  clearNativePush()
 }

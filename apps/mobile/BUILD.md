@@ -8,6 +8,9 @@
 > **产出不了可安装的 APK**。签名 APK 必须由 **HBuilderX** 走"发行 → 原生 App-云打包"。
 > 这不是本项目偷懒，是 uni-app 的发行模型：DCloud 的打包机负责生成并签名原生壳，
 > 本地没有、也不需要 Android Studio 工程。
+>
+> 补充（2026-10-20 实测）：HBuilderX 自带的 `cli.exe` 可以在命令行里驱动这次云打包，见第 2b 节；
+> 但账号登录与 appid 这两步它替不了你。
 
 因此本仓库里所有代码级验证都止于浏览器（H5）。**真机行为 —— 本地通知、扫码、明文 HTTP ——
 只有在下面这些步骤做完之后才算被验证过。**
@@ -48,9 +51,10 @@ IP 怎么查：Windows `ipconfig`（无线局域网适配器 WLAN 的 IPv4 地�
 2. 后端监听的是 `0.0.0.0` 而不是 `127.0.0.1`，否则局域网请求根本进不来；
 3. Windows 防火墙放行 3000 端口（或临时关掉专用网络的防火墙）。
 
-`.env.production` 里现在是 `https://REPLACE-ME.example.com/api`，**这是刻意的占位**：
-少了它，配置缺失会在启动时直接抛错，比"上线后连不上自己排查半天"要好。
-正式部署时换成公网可达的 HTTPS 域名。
+`.env.production` 现在填的是 `http://172.16.120.55:3000/api`（同一 WiFi 下的真机试用地址），
+不是当初那个 `https://REPLACE-ME.example.com/api`。**换回占位符也行，而且正式部署时必须换**：
+缺配置会在启动时直接抛错，比"上线后连不上自己排查半天"要好。正式部署时换成公网可达的 HTTPS 域名。
+注意这台机器的局域网 IP 是 DHCP 分的，重启/换网络就会变，改完要重新 `build:app` 或重新云打包。
 
 顺带一句：H5 开发服务器默认只监听 `127.0.0.1`，想在手机浏览器里打开同一个页面调试，
 需要 `pnpm --filter @moonbud/mobile dev:h5 -- --host`（uni 会把 `--host` 透传给 vite）。
@@ -73,7 +77,66 @@ IP 怎么查：Windows `ipconfig`（无线局域网适配器 WLAN 的 IPv4 地�
    证书先用"DCloud 老版证书/公共证书"跑通，正式上架再换自己的证书。
 7. 打包完成后下载 APK，装到手机上。
 
+**图标配置写出来的路径在 `unpackage/res/icons/*.png`，而 `unpackage/` 是 gitignore 的。**
+所以换一台机器（或重新 clone）之后，manifest 里那些路径指向的文件不存在，云打包会报图标缺失：
+在"App图标配置"里用 `src/static/logo.png` 重新生成一次即可。
+
 **装好后第一件事**：登录 → 首页 → 记一笔喂奶。这条链路通了，说明第 1 节的地址配置是对的。
+
+### 2b. 用命令行驱动云打包（HBuilderX 4.x+ 的 `cli.exe`）
+
+第 2 节的菜单点击不是唯一通路。HBuilderX 安装目录下有 `cli.exe`，它能完成导入和云打包，
+只是**仍然要 DCloud 账号登录，仍然要真 appid** —— 这两步 cli 代劳不了：
+
+```
+# 一次性：把 apps/mobile 导进 HBuilderX（HBuilderX 需要处于打开状态）
+<E:\software\HBuilderX>\cli.exe project open --path D:\mine\moonBud\apps\mobile
+<E:\software\HBuilderX>\cli.exe project list          # 应能看到 mobile(UniApp_VUE)
+
+# 每次打包
+cli.exe pack --project D:\mine\moonBud\apps\mobile --platform android \
+  --android.packagename com.moonbud.app --android.androidpacktype 1 --ignoreWarnings true
+```
+
+`--android.androidpacktype` 取值：0 自有证书、1 DCloud 公共证书、2 DCloud 老版证书、3 云端证书。
+先用 1 跑通，正式上架再换 0。产物（APK 下载链接）出现在 HBuilderX 的下拉列表里，
+`cli.exe logcat pack` 能看打包控制台日志，`cli.exe pack status --project <路径>` 能看任务状态。
+
+两个只有 GUI 能做的准备，顺序不能反：
+
+1. **登录**：`cli user info` 会打印出保存过的用户名，但那只是记住的账号名。会话过期时
+   `pack` 直接回 `user not login`（实测 2026-10-20）。在 HBuilderX 右上角点头像重新登录；
+   `cli user login --username … --password …` 能用，但要你把密码交进命令行，不推荐。
+2. **取真 appid**：登录后在 HBuilderX 里双击 `src/manifest.json` →"基础配置"→ appid 右侧"重新获取"。
+   带着 `__UNI__MOONBUD` 这个占位符，云打包会拒绝。
+
+另外这里没配应用图标（`manifest.json` 里没有 `icons`），云打包会用 DCloud 默认图标 —— 试用包无所谓，
+正式包要在"基础配置 → 图标设置"里补一张 192x192 的图。
+
+### 2c. HBuilderX 编译报 `Cannot find module .../vite-plugin-uni/bin/uni.js`
+
+CLI 创建的 uni-app 项目在 HBuilderX 里发行时，**用的是项目本地的编译器**，而它按字面路径找
+`<项目目录>/node_modules/@dcloudio/vite-plugin-uni/bin/uni.js`，不会向上解析。
+本仓库是 pnpm workspace 且依赖被 hoist 到仓库根的 `node_modules`，`apps/mobile/node_modules` 里
+只有 `@moonbud`，所以那句路径必然不存在（实测 2026-10-20，发行→云打包 1 秒即失败）。
+
+补一个目录联接即可，只动 gitignore 里的 `node_modules`：
+
+```
+# PowerShell（cmd 的 mklink 经 git-bash 传引号会坏，用这个）
+New-Item -ItemType Junction -Path 'D:\mine\moonBud\apps\mobile\node_modules\@dcloudio' `
+  -Target 'D:\mine\moonBud\node_modules\@dcloudio'
+Test-Path 'D:\mine\moonBud\apps\mobile\node_modules\@dcloudio\vite-plugin-uni\bin\uni.js'   # 应为 True
+```
+
+HBuilderX 编译产物落在 `apps/mobile/unpackage/`，也在 gitignore 里。
+
+**要撤的时候用 `rmdir`，不要用 `rm -rf`**：联接在类 Unix 的删除语义下会被当成普通目录穿透，
+`rm -rf` 会顺着它删掉仓库根真正的那份 `node_modules/@dcloudio`。
+
+```
+cmd /c rmdir "D:\mine\moonBud\apps\mobile\node_modules\@dcloudio"
+```
 
 **必须在真机上单独确认的一条：PATCH。** 后端的修改类路由（改家庭名、改孩子、改提醒、改记录）
 全是 PATCH。`@dcloudio/types` 的 `request` 方法枚举里**没有 PATCH**，所以
@@ -89,6 +152,13 @@ IP 怎么查：Windows `ipconfig`（无线局域网适配器 WLAN 的 IPv4 地�
 - 提醒的**主路径永远是站内提醒中心**（底部"提醒"tab → 右上角"提醒中心"）。它不依赖推送权限，任何平台都可用。
 - `plus.push` 的本地排期**只在 APP 端存在**（`src/notifications/local-notify.ts` 用条件编译隔离）。
   在 H5/小程序上这个调用会 `console.warn` 一句"当前平台不支持本地通知"，不是 bug。
+- **APK 必须打进 push 模块**，`plus.push` 才存在：`manifest.json` 里要写
+  `"app-plus": { "modules": { "Push": {} } }`。只声明模块、不配 `sdkConfigs.push.unipush` ——
+  我们要的是本机定时通知，不接个推/厂商通道，省掉 uni-push 后台开通那一堆配置。
+  真机实测（2026-10-20）：没打这个模块时每次排期都抛"打包时未添加push模块，请参考…"，
+  家长看到的是一句莫名其妙的原生报错。现在 `local-notify.ts` 把两处原生调用都包进 try/catch，
+  登记表照写、调用方不被炸断、这句只在第一次落一条 `console.warn`（有单测钉住），
+  但**提醒依然只剩站内提醒中心和应用内到点提示** —— 想要锁屏通知就得按上面那行声明重新打包。
 - 已知限制，界面上"我的 → 关于"也写了：**APP 被关闭、或被系统在后台回收时，本地推送可能不响。**
   国产 ROM 的省电策略尤其激进 —— 需要在系统设置里给 moonBud 开"允许后台运行/自启动"。
 - Android 13+ 首次需要授予通知权限，`manifest.json` 里已声明 `POST_NOTIFICATIONS`。

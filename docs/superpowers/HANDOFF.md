@@ -386,7 +386,8 @@ MutationObserver 的 `addedNodes` 里看不到它，别把"没记录到"当成"�
 恰好排第一。判定为首个套件冷启动时独立 `resetDatabase` 客户端与 app 的 PrismaService 两路
 连接交叠的老问题，与本次改动无关（`events` 套件在全量里照样 PASS）。没动测试脚手架：改
 `resetDatabase`/`createTestApp` 的连接时序会牵动所有 e2e 文件，超出本任务范围。**下次要真
-修就从这个首套件竞态入手。**
+修就从这个首套件竞态入手。**（已收：见下面（八）——3 趟全量不可复现，判为端口抖动；但顺手
+修掉了 `resetDatabase` 那个从不 `$disconnect` 的模块级单例连接泄漏。）
 
 ### 2026-10-20（周二）（七）：防重复提示的窗口能按类型调了（补上 §"可从设置调整"）
 
@@ -420,6 +421,42 @@ overrides)`（非正数的脏覆盖按没设处理，回落默认）。`stores/d
 的"第一个"未必是刚点开的那个——我点 30 结果写到了 `sleep` 上。要精确验证某一行，直接
 `uni.setStorageSync('dupWindowMinutes', {feeding:30})` 再 reload（走的正是 `init` 读的那条路），
 比在轮子上猜索引稳。
+
+### 2026-10-20（周二）（八）：e2e 全量跑不再泄漏连接池（#49，收（六）那条欠账）
+
+（六）末尾记了一笔"首套件 `members` 全量跑偶发 500（`refresh_tokens_userId_fkey` /
+`families_ownerId_fkey`）"，当时判为"独立 `resetDatabase` 客户端与 app 的 PrismaService
+两路连接交叠"，超出那次任务范围没动。这次专门收。
+
+**先复现，别猜**：连跑 3 趟全量 `test:e2e`（`--runInBand`），**0 次复现**——15/15 全绿，
+其中两趟 `members` 恰好排第一也都过。之前那个 `ECONNREFUSED 127.0.0.1:5433` 的堆栈，回看
+是在我挂了一个后台任务、docker 端口瞬时不接时抓到的，不是稳定的套件竞态。**所以"首套件
+假红"按不可复现对待**，没有硬去"修一个抓不到的时序 bug"。
+
+**但源码里确有一条能证明的缺陷**：`test/utils/db.ts` 的 `resetDatabase()` 把 PrismaClient
+缓成**模块级单例**且从不 `$disconnect`。jest 的文件沙箱让每个 spec 各拿一份，一趟全量串行跑
+要攒**十几个常驻连接池**到进程退出才回收；这条"额外的一路冷连接"正是（六）怀疑的那个交叠点。
+改成每次调用现起客户端、TRUNCATE 完在 `finally` 里 `$disconnect`：泄漏按构造消失，且完全
+不碰 app 的请求路径（清库仍走独立连接，语义与改前一致）。库引擎是进程内复用（library engine），
+`$disconnect` 只关连接池不关引擎，所以每次多花的是一次建连，实测全量仍 194s，无退化。
+
+验证：改后全量 `test:e2e` **15 套 142 用例连续两趟全绿**（其中一趟 `members` 排第一），
+`pnpm --filter @moonbud/api typecheck` 干净。RED→GREEN 这里指经验性证据：改前一趟全量在
+端口抖动下报过 `ECONNREFUSED`/FK，改后同负载连跑两趟无一次失败、无残留连接。
+
+**仍未做**：没给 `resetDatabase` 加"复用 app 的 PrismaService"那种更彻底的单路径化——
+那要改 13 个 spec 的调用点，而假红既然不可复现，就不值得为它扩大改动面、引入新的回归风险。
+真机（Android）相关的待验证项见下节。
+
+### 待真机验证（本地跑不了，非缺陷）
+
+这些只能在装了系统的 Android 设备/HBuilderX 出包上验，H5 里 `plus.*` 是 no-op：
+- **本地定时通知**：`plus.push.createMessage` 在 App 完全关闭时是否按排期点响；重复提醒
+  前台重算后，锁屏那侧的排期是否跟着整块替换（`notifications/reminder-arming.ts` + `App.onShow`）。
+- **原生 tabBar / 导航栏跟随主题**：`theme/native-chrome.ts` 运行时覆盖的色值在真机上是否
+  生效、切主题即时刷新、AA 文字对比度在实屏上成立。
+- **防重复提示的输入体验**：`dup-window-settings` 的原生 `<picker>` 在真机滚轮上选"默认/分钟"
+  的落值，与 H5 用 `setStorageSync` 绕过选择器验证的差距。
 
 ### 踩过的坑，下次直接避开
 - **`apps/api` 的常驻服务是 `node apps/api/dist/main.js`，改 `src` 不会生效。**

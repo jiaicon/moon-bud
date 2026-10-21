@@ -10,7 +10,6 @@ import { eventsApi, remindersApi } from '../../api/endpoints'
 import { EVENT_TYPE_META } from '../../events/event-fields'
 import { buildTodaySummary, type TodaySummary } from '../../events/summary'
 import { buildGuestOverviewRows, buildOverviewRows, decideHomeView } from './home-view'
-import { confirmLoginGate } from '../../guest/gate'
 import { guardForcedChange } from '../../utils/forced-change'
 import { refreshUnreadTabBadge } from '../../notifications/tab-badge'
 import { mergePendingRows } from '../../sync/pending-view'
@@ -158,16 +157,6 @@ const rowIcon = (key: string) =>
 
 const isGuest = computed(() => authStore.isGuest)
 
-/**
- * 游客看得到整副骨架，点其中任何一处都只问一句。判断放在这里而不是散进模板：
- * 加一格控件就有人忘记问。
- */
-function gate(key: string): boolean {
-  if (!authStore.isGuest) return false
-  void confirmLoginGate(key)
-  return true
-}
-
 const view = computed(() =>
   decideHomeView({
     session: authStore.session,
@@ -190,15 +179,15 @@ const overdueCount = computed(() => summary.value?.overdueCount ?? 0)
         <family-switcher @change="refresh" />
         <child-switcher @change="refresh" />
       </view>
-      <!-- 游客也画这两格：它们定的是"看哪一家、给哪个孩子"，游客名下没有，所以是短横线。 -->
+      <!-- 游客也画这两格：它们定的是"看哪一家、给哪个孩子"，游客名下没有，所以写"无"。 -->
       <view v-else-if="isGuest" class="home__switchers">
-        <view class="home__switcher" @click="gate('家庭')">
+        <view class="home__switcher">
           <text class="home__switcher-label">家庭</text>
-          <text class="home__switcher-value">—</text>
+          <text class="home__switcher-value">无</text>
         </view>
-        <view class="home__switcher" @click="gate('孩子')">
+        <view class="home__switcher">
           <text class="home__switcher-label">孩子</text>
-          <text class="home__switcher-value">—</text>
+          <text class="home__switcher-value">无</text>
         </view>
       </view>
 
@@ -209,8 +198,9 @@ const overdueCount = computed(() => summary.value?.overdueCount ?? 0)
       </view>
 
       <!--
-        游客这一屏画的是同一副骨架：概览行留着、值给短横线，引导坐在内容区，
-        记一笔九宫格与统计入口都在——点了只问一句，绝不落到写表单里。
+        游客这一屏画的是同一副骨架：概览行留着、值给"无"，引导坐在内容区。
+        记一笔与曲线整块不给——前者要落在一个孩子身上，后者要读这一家的记录，
+        游客两样都没有，留一颗点了没反应的按钮比不给更骗人。
       -->
       <template v-else-if="view === 'guest'">
         <view class="card">
@@ -224,18 +214,6 @@ const overdueCount = computed(() => summary.value?.overdueCount ?? 0)
         </view>
 
         <guest-guide page="home" />
-
-        <text class="section__title">记一笔</text>
-        <view class="grid">
-          <view v-for="type in EVENT_TYPES" :key="type" class="grid__cell" @click="gate('记一笔')">
-            <text class="grid__icon">{{ EVENT_TYPE_META[type].icon }}</text>
-            <text class="grid__label">{{ EVENT_TYPE_META[type].label }}</text>
-          </view>
-        </view>
-
-        <view class="stats-entry" @click="gate('/pages/stats/index')">
-          <text class="stats-entry__label">📊 看趋势 / 生长曲线</text>
-        </view>
       </template>
 
       <view v-else-if="view === 'retry'" class="home__empty">
@@ -316,7 +294,7 @@ const overdueCount = computed(() => summary.value?.overdueCount ?? 0)
   gap: 16rpx;
 }
 
-/* 游客那两格占位长得和真切换器一样：同一副圆角胶囊，只是值是一根短横线。 */
+/* 游客那两格占位长得和真切换器一样：同一副圆角胶囊，只是值是一个"无"字。 */
 .home__switcher {
   display: flex;
   flex-direction: row;

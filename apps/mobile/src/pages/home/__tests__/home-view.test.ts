@@ -114,10 +114,10 @@ describe('首页视图判定', () => {
    * 直接把 null 喂给 buildOverviewRows 会念出"今天还没有 / 0 次"——
    * 那是"这个家今天没人喂过孩子"，而他根本没有这个家。
    */
-  it('游客的概览行只有短横线，不说"今天还没有"', () => {
+  it('游客的概览行只说"无"，不说"今天还没有"', () => {
     const rows = buildGuestOverviewRows()
     expect(rows.map((r) => r.label)).toEqual(['最近喂奶', '最近睡眠', '今日换尿布'])
-    expect(rows.map((r) => r.value)).toEqual(['—', '—', '—'])
+    expect(rows.map((r) => r.value)).toEqual(['无', '无', '无'])
     expect(rows.every((r) => !r.failed)).toBe(true)
   })
 })

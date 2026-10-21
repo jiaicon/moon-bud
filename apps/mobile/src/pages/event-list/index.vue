@@ -5,7 +5,6 @@ import { computed, getCurrentInstance, nextTick, ref, watch, type Ref } from 'vu
 import { eventsApi, membersApi } from '../../api/endpoints'
 import { canModifyEvent, stageForEdit } from '../../events/event-edit'
 import { centerScrollLeft } from '../../events/chip-scroll'
-import { confirmLoginGate } from '../../guest/gate'
 import { EVENT_TYPE_META } from '../../events/event-fields'
 import { groupByDay } from '../../events/day-groups'
 import { buildEventQuery, emptyListCopy, rangeBounds, RANGE_OPTIONS, recorderOptions, type EventRange } from '../../events/list-filters'
@@ -220,17 +219,10 @@ onReachBottom(() => {
 })
 
 /**
- * 游客看得到整副筛选栏，点其中任何一处只问一句。判断集中在这里，
- * 不散进模板：加一格筛项就有人忘记问。
+ * 筛选对游客也点得动：顶行两排 chips 与那颗展开按钮改的都是本地筛项，
+ * 取数由 run() 开头"没有家庭就返回"挡着。游客要登录只有引导那一颗，不弹窗拦他。
  */
-function gate(key: string): boolean {
-  if (!authStore.isGuest) return false
-  void confirmLoginGate(key)
-  return true
-}
-
 function pickType(next: EventType | '') {
-  if (gate('筛选')) return
   if (typeFilter.value === next) return
   typeFilter.value = next
   void load(true)
@@ -243,22 +235,19 @@ function pickChild(next: string) {
 }
 
 function pickRecorder(next: string) {
-  if (gate('筛选')) return
   if (recorderFilter.value === next) return
   recorderFilter.value = next
   void load(true)
 }
 
 function pickRange(next: EventRange) {
-  if (gate('筛选')) return
   if (rangeFilter.value === next) return
   rangeFilter.value = next
   void load(true)
 }
 
-/** 展开抽屉也是筛选的一部分：游客点开它同样只问一句。 */
+/** 展开抽屉列的是类型的全体，横滑看不见的那些在这里给出来。 */
 function openTypeSheet() {
-  if (gate('筛选')) return
   typeSheetOpen.value = true
 }
 
@@ -310,7 +299,7 @@ function exportRows(serverEvents: EventDto[]): EventDto[] {
 }
 
 async function exportCurrent(): Promise<void> {
-  if (gate('导出 CSV')) return
+  // 游客那一颗按钮根本不画（模板上的 v-if），这一格挡的是深链与以后别处的复用。
   if (!familyId.value || exporting.value) return
   exporting.value = true
   uni.showLoading({ title: '正在导出…' })
@@ -541,8 +530,9 @@ async function removeEvent(event: EventDto): Promise<void> {
             >
               <text class="chip__label">{{ opt.label }}</text>
             </view>
-            <!-- 导出贴在这一行末尾：它作用于"当前这套筛项"，放得越靠近筛项越不像另一回事。 -->
-            <view class="export" :class="{ 'export--busy': exporting }" @click="exportCurrent">
+            <!-- 导出贴在这一行末尾：它作用于"当前这套筛项"，放得越靠近筛项越不像另一回事。
+                 游客不画：导出要读的是全家的记录，而他连家庭都没有。 -->
+            <view v-if="!isGuest" class="export" :class="{ 'export--busy': exporting }" @click="exportCurrent">
               <text class="export__label">{{ exporting ? '导出中…' : '导出 CSV' }}</text>
             </view>
           </view>

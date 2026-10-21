@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
-import { confirmLoginGate, LOGIN_ENTRY_URL, needsLogin, TEACH_PATH } from '../../guest/gate'
+import { LOGIN_ENTRY_URL, needsLogin, TEACH_PATH } from '../../guest/gate'
 import { GUEST_LANDING_URL } from '../../guest/guide'
 import { fetchUnreadCount } from '../../notifications/unread'
 import { applyUnreadBadge } from '../../notifications/tab-badge'
@@ -103,19 +103,16 @@ async function logout(): Promise<void> {
 }
 
 /**
- * 游客点这一页的行：要账号的那一行先问一句，愿意才去登录页。
- * 行本身一律留着——藏起来等于让游客以为这个应用没有这个功能。
+ * 游客点要账号的那一行：什么都不做。行一律留着——藏起来等于让他以为这个应用没这个功能；
+ * 而"要先登录吗"那一句已经撤了，他要登录走底下那颗按钮，那才是明路。
  * 注意写法必须是"点了就跳"的那一种：`@click="open('/x')"` 拿到的是表达式的返回值，柯里工厂造出来的函数没人去调。
  */
-async function open(entry: string): Promise<void> {
-  if (needsLogin(entry, isGuest.value)) {
-    await confirmLoginGate(entry)
-    return
-  }
+function open(entry: string): void {
+  if (needsLogin(entry, isGuest.value)) return
   uni.navigateTo({ url: entry })
 }
 
-/** 游客点这一颗不需要先问"需要登录吗"——他点的就是登录。 */
+/** 游客要点的就是登录本身，这一颗不设守卫——它是这一屏唯一那条明路。 */
 function goLogin(): void {
   uni.navigateTo({ url: LOGIN_ENTRY_URL })
 }

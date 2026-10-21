@@ -3,10 +3,21 @@ import { computed } from 'vue'
 import PreviewFrame from '../../components/PreviewFrame.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import ThemeSwitcher from '../../components/ThemeSwitcher.vue'
+import { LOGIN_ENTRY_URL } from '../../guest/gate'
 import { EVENT_TYPE_META } from '../../events/event-fields'
 import { formatEventLine } from '../../events/format-event'
 import { PREVIEW_SCREENS, MOCK_CHILD, MOCK_EVENTS, MOCK_FAMILY, MOCK_REMINDERS } from '../../preview/mock-data'
+import { useAuthStore } from '../../stores/auth'
 import { wallStamp } from '../../utils/wall-time'
+
+const authStore = useAuthStore()
+
+/**
+ * 这一页现在也服务已经登录的人（"我的"里的功能教学）。顶上那格"注册 / 登录"
+ * 对他说的是"你还没有账号"，所以只给还没账号的人画。会话还没问出来的那一瞬
+ * 先按"没登录"画——它比"登录后消失"更像一个不撒谎的起点。
+ */
+const loggedIn = computed(() => authStore.session === 'member')
 
 // 游客预览用的是 mock 家庭，它没有账号时区可查，就按样例数据写死的那一个念。
 const PREVIEW_TIMEZONE = 'Asia/Shanghai'
@@ -30,6 +41,15 @@ const upcoming = MOCK_REMINDERS.filter((r) => r.dueAt && new Date(r.dueAt).getTi
 const screen = (key: string) => PREVIEW_SCREENS.find((s) => s.key === key)!
 
 const go = (url: string) => uni.navigateTo({ url })
+
+/** 底部那颗"开始使用"：没账号的人送去注册，已经登录的人送回首页——首页是 Tab 页，navigateTo 进不去。 */
+function start(): void {
+  if (loggedIn.value) {
+    uni.switchTab({ url: '/pages/home/index' })
+    return
+  }
+  uni.navigateTo({ url: LOGIN_ENTRY_URL })
+}
 </script>
 
 <template>
@@ -40,7 +60,7 @@ const go = (url: string) => uni.navigateTo({ url })
           <text class="preview__title">它能做什么</text>
           <text class="preview__hint">下面是真实界面，数据是示例。想试配色可以直接换。</text>
         </view>
-        <view class="preview__login" @click="go('/pages/login/index?mode=login')">
+        <view v-if="!loggedIn" class="preview__login" @click="go('/pages/login/index?mode=login')">
           <text class="preview__login-label">注册 / 登录</text>
         </view>
       </view>
@@ -108,7 +128,7 @@ const go = (url: string) => uni.navigateTo({ url })
       </preview-frame>
 
       <view class="preview__footer">
-        <view class="btn btn--primary" @click="go('/pages/login/index?mode=register')">
+        <view class="btn btn--primary" @click="start">
           <text class="btn__label">开始使用</text>
         </view>
       </view>

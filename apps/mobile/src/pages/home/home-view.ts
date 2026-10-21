@@ -51,18 +51,18 @@ export interface OverviewRow {
 
 const FAILED_TEXT = '没加载出来'
 const EMPTY_TEXT = '今天还没有'
-const PLACEHOLDER_TEXT = '—'
+const NONE_TEXT = '无'
 
 /**
- * 游客那一屏的概览行：骨架照画，值一律短横线。
+ * 游客那一屏的概览行：骨架照画，值一律"无"。
  * 这里不能借 buildOverviewRows(null) —— 它念的是"今天还没有 / 0 次"，
  * 那是一句关于某个真实孩子的断言，而游客连家庭都没有。
  */
 export function buildGuestOverviewRows(): OverviewRow[] {
   return [
-    { key: 'feeding', label: '最近喂奶', value: PLACEHOLDER_TEXT, failed: false },
-    { key: 'sleep', label: '最近睡眠', value: PLACEHOLDER_TEXT, failed: false },
-    { key: 'diaper', label: '今日换尿布', value: PLACEHOLDER_TEXT, failed: false },
+    { key: 'feeding', label: '最近喂奶', value: NONE_TEXT, failed: false },
+    { key: 'sleep', label: '最近睡眠', value: NONE_TEXT, failed: false },
+    { key: 'diaper', label: '今日换尿布', value: NONE_TEXT, failed: false },
   ]
 }
 

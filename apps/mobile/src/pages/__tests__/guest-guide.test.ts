@@ -19,6 +19,13 @@ function before(who: string, text: string, a: string, b: string): void {
   expect(at, `${who}：「${a}」排在了「${b}」后面`).toBeLessThan(then)
 }
 
+/** 某一段函数体：从它的定义到第一个顶格右花括号。 */
+function functionBody(text: string, signature: string): string {
+  const at = text.indexOf(signature)
+  expect(at, `找不到「${signature}」`).toBeGreaterThan(-1)
+  return text.slice(at, text.indexOf('\n}', at))
+}
+
 describe('游客空状态组件', () => {
   const guide = src('components/GuestGuide.vue')
 
@@ -82,15 +89,18 @@ describe('游客碰不到写入的控件', () => {
     }
   })
 
-  it('首页的切换器对游客画成短横线，点了问一句而不是开选择器', () => {
+  it('首页的切换器对游客画成"无"，点了什么也不做', () => {
     const home = src('pages/home/index.vue')
-    // 旧规矩是"游客整块看不见切换器"；现在骨架要全画出来，值用短横线，点击落到门禁上。
+    // 旧规矩是"游客整块看不见切换器"；现在骨架要全画出来，值说实话，点击不弹窗。
     expect(home).not.toMatch(/<view v-if="!isGuest" class="home__switchers">/)
     const switchers = guestBranchOf(home, 'v-else-if="isGuest"', '<!--')
     expect(switchers).toContain('home__switchers')
     // 真的家庭/孩子切换器带请求与选择器，游客那一格只能是占位。
     expect(switchers).not.toMatch(/family-switcher|child-switcher/)
-    expect(switchers, '游客的切换器没接门禁').toMatch(/gate\('/)
+    // 2026-10-21：占位就是占位，不挂任何动作——弹窗那句已经撤了。
+    expect(switchers, '游客的切换器还挂着点击').not.toMatch(/@click=/)
+    expect(switchers).not.toMatch(/gate\(/)
+    expect(switchers, '游客切换器的值没写"无"').toContain('>无<')
   })
 })
 
@@ -108,47 +118,76 @@ function guestBranchOf(text: string, marker: string, until: string): string {
 }
 
 describe('游客看得到整副骨架，引导只占空白区', () => {
-  it('首页：切换器 → 概览卡（短横线）→ 引导 → 记一笔 → 统计入口', () => {
+  it('首页：切换器 → 概览卡（无）→ 引导；记一笔与曲线整块拿掉', () => {
     const home = src('pages/home/index.vue')
     const tpl = home.slice(home.indexOf('<template>'))
     // 引导在内容区，不在最上面：两格切换器要先画出来。
     before('home', tpl, 'v-else-if="isGuest"', '<guest-guide page="home"')
     const branch = guestBranchOf(tpl, "view === 'guest'", `v-else-if="view === 'retry'"`)
-    for (const part of ['guestRows', '<guest-guide', '记一笔', '看趋势']) {
+    for (const part of ['guestRows', '<guest-guide']) {
       expect(branch, `首页游客分支少了「${part}」`).toContain(part)
     }
-    before('home', branch, '<guest-guide', '记一笔')
+    // 记一笔要落在一个孩子身上，曲线要读这一家的记录：游客两样都没有，
+    // 于是这两块连入口都不画，而不是留一颗点了没反应的按钮。
+    for (const gone of ['记一笔', '看趋势', 'stats-entry', 'grid__cell', 'goEvent']) {
+      expect(branch, `首页游客分支还留着「${gone}」`).not.toContain(gone)
+    }
     // 行里的值必须来自游客专用的构建器：那份通用的会说"今天还没有"，而游客没有家。
     expect(home).toMatch(/const guestRows = computed\(\(\) => buildGuestOverviewRows\(\)\)/)
   })
 
-  it('记录页：筛选栏画在引导之上，游客点它只问一句', () => {
+  it('记录页：筛选栏画在引导之上，游客点它只换高亮、不发请求', () => {
     const events = src('pages/event-list/index.vue')
     const tpl = events.slice(events.indexOf('<template>'))
     before('events', tpl, 'class="timeline__filters"', '<guest-guide')
     expect(events).toMatch(/<guest-guide v-if="isGuest"/)
-    // 筛选与导出在游客身上不许直接改状态或发请求。
-    expect(events).toMatch(/if \(gate\('筛选'\)\) return/)
-    expect(events).toMatch(/if \(gate\('导出 CSV'\)\) return/)
+    // 筛项对游客放开：弹窗那句已经撤了，取数由"没有家庭就返回"这一格挡着。
+    expect(events, '游客点筛选还在弹窗').not.toMatch(/gate\('筛选'\)/)
+    expect(events).toMatch(/async function run\(reset: boolean\): Promise<void> \{[\s\S]{0,40}if \(!familyId\.value\) return/)
+    // 顶行那颗展开按钮也是筛选，游客同样点得开。
+    expect(events).toMatch(/@click="openTypeSheet"/)
+    expect(functionBody(events, 'function openTypeSheet()')).toMatch(/typeSheetOpen\.value = true/)
+    // 导出读的是全家的记录，游客连家庭都没有：这一颗不画。
+    expect(tpl).toMatch(/<view v-if="!isGuest" class="export"/)
   })
 
-  it('提醒页：三段与提醒中心画在引导之上，游客点它们只问一句', () => {
+  it('提醒页：三段对游客可点，提醒中心不画', () => {
     const reminders = src('pages/reminder-list/index.vue')
     const tpl = reminders.slice(reminders.indexOf('<template>'))
     before('reminders', tpl, 'u-subsection', '<guest-guide')
-    before('reminders', tpl, '提醒中心', '<guest-guide')
     expect(reminders).toMatch(/<guest-guide v-if="isGuest"/)
-    expect(reminders).toMatch(/if \(gate\('提醒分段'\)\) return/)
+    expect(reminders, '游客点分段还在弹窗').not.toMatch(/gate\('提醒分段'\)/)
+    expect(reminders).toMatch(/async function run\(reset: boolean\): Promise<void> \{[\s\S]{0,40}if \(!familyId\.value\) return/)
+    // 提醒中心里是这一家还没处理的通知，游客没有家：这一行整格收掉。
+    expect(tpl).toMatch(/<view v-if="!isGuest" class="link-row">/)
   })
 
-  it('三页都自带一个"游客问一句、会员照旧走"的 gate 助手', () => {
-    for (const rel of ['pages/home/index.vue', 'pages/event-list/index.vue', 'pages/reminder-list/index.vue']) {
+  it('三页加"我的"都不再向游客弹登录引导', () => {
+    for (const rel of [
+      'pages/home/index.vue',
+      'pages/event-list/index.vue',
+      'pages/reminder-list/index.vue',
+      'pages/profile/index.vue',
+    ]) {
       const text = src(rel)
-      expect(text, `${rel} 没接门禁`).toContain('confirmLoginGate')
-      // 判断只许有这一处：散在模板的 @click 里，加一个控件就有人漏掉游客。
-      expect(text, `${rel} 的游客判断没集中成一个 gate 助手`).toMatch(
-        /function gate\(key: string\): boolean \{[\s\S]*?isGuest[\s\S]*?\}/,
-      )
+      expect(text, `${rel} 还在弹"需要登录"`).not.toContain('confirmLoginGate')
+      expect(text, `${rel} 还留着 gate 助手`).not.toMatch(/function gate\(key: string\)/)
     }
+  })
+})
+
+describe('游客在"我的"点一行', () => {
+  const profile = src('pages/profile/index.vue')
+  const open = functionBody(profile, 'function open(entry')
+
+  it('要账号的那一行直接返回，不跳也不弹', () => {
+    expect(open).toMatch(/if \(needsLogin\(entry, isGuest\.value\)\) return/)
+    expect(open).toContain('uni.navigateTo({ url: entry })')
+    expect(profile.indexOf('needsLogin(entry')).toBeLessThan(profile.indexOf('uni.navigateTo({ url: entry })'))
+  })
+
+  it('教学与主题那两行照旧进得去，登录那颗照旧是明路', () => {
+    expect(profile).toMatch(/@click="open\(TEACH_PATH\)"/)
+    expect(profile).toMatch(/function goLogin\(\): void \{[\s\S]{0,40}uni\.navigateTo\(\{ url: LOGIN_ENTRY_URL \}\)/)
   })
 })

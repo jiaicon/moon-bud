@@ -3,7 +3,6 @@ import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import type { MemberDto, ReminderDto, ReminderListFilter } from '@moonbud/shared'
 import { membersApi, remindersApi } from '../../api/endpoints'
-import { confirmLoginGate } from '../../guest/gate'
 import { guardForcedChange } from '../../utils/forced-change'
 import { resyncActiveReminderSchedules, assigneeLabel } from '../../notifications/reminder-arming'
 import { refreshUnreadTabBadge } from '../../notifications/tab-badge'
@@ -97,17 +96,10 @@ async function complete(reminder: ReminderDto): Promise<void> {
 }
 
 /**
- * 游客看得到分段与提醒中心，点其中任何一处只问一句。判断集中在这里，
- * 不散进模板：加一格分段就有人忘记问。
+ * 三段对游客也点得动：它改的只是本地高亮，取数由 run() 开头"没有家庭就返回"挡着。
+ * 提醒中心那一格对游客根本不画（它读的是这一家还没处理的通知），所以这里不拦、也不弹。
  */
-function gate(key: string): boolean {
-  if (!authStore.isGuest) return false
-  void confirmLoginGate(key)
-  return true
-}
-
 function pickTab(index: number): void {
-  if (gate('提醒分段')) return
   if (tabIndex.value === index) return
   tabIndex.value = index
   void load()
@@ -117,10 +109,7 @@ const goDetail = (id: string) => uni.navigateTo({ url: `/pages/reminder-form/ind
 const goCreate = () => uni.navigateTo({ url: '/pages/reminder-form/index' })
 const goFamily = () => uni.navigateTo({ url: '/pages/family-select/index' })
 
-function goNotifications(): void {
-  if (gate('/pages/notification-center/index')) return
-  uni.navigateTo({ url: '/pages/notification-center/index' })
-}
+const goNotifications = () => uni.navigateTo({ url: '/pages/notification-center/index' })
 
 // onLoad 已经拉过；onShow 只代表"从别处回到本页"。两边都拉会让首屏发双份请求。
 /**
@@ -185,10 +174,11 @@ onPullDownRefresh(() => {
       />
 
       <template v-else>
-        <!-- 分段与提醒中心和会员看到的是同一副骨架：复制两遍就会有一份跟着不上改动。 -->
+        <!-- 分段与提醒中心和会员看到的是同一副骨架：复制两遍就会有一份跟着不上改动。
+             提醒中心这一格游客没有——里面是这一家还没处理的通知，而他连家庭都没有。 -->
         <u-subsection :list="TABS" :current="tabIndex" active-color="var(--mb-color-primary)" @change="pickTab" />
 
-        <view class="link-row">
+        <view v-if="!isGuest" class="link-row">
           <text class="link" @click="goNotifications">提醒中心 ›</text>
         </view>
 

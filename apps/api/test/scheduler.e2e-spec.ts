@@ -127,6 +127,35 @@ describe('提醒调度', () => {
     expect(r.created).toBeLessThanOrEqual(500)
   })
 
+  /**
+   * "每两天 08:00"这一档预设带 INTERVAL=2，网格必须由创建时刻对齐。
+   * 由查询窗口起点对齐的话，窗口每天前移、网格每天重排，这条提醒一天实例都生不出来：
+   * 家长以为维D每隔两天喂一次，实际从来没响过。
+   */
+  it('每两天的提醒在网格日会响：连续四天各扫一次，恰好两天有实例', async () => {
+    const created = await createReminder({
+      title: '维D',
+      type: 'RECURRING',
+      rrule: 'FREQ=DAILY;INTERVAL=2;BYHOUR=8;BYMINUTE=0',
+      timezone: 'Asia/Shanghai',
+    }).expect(201)
+    // 把这条提醒钉在 10-19 10:00（上海）创建：当天 08:00 已过，网格因此落在 21、23……
+    const anchor = new Date('2026-10-19T10:00:00+08:00')
+    await prisma.reminder.update({
+      where: { id: created.body.id as string },
+      data: { createdAt: anchor, updatedAt: anchor },
+    })
+
+    const perDay: number[] = []
+    for (const day of [20, 21, 22, 23]) {
+      const r = await scheduler.tick(new Date(`2026-10-${day}T09:00:00+08:00`))
+      perDay.push(r.created)
+    }
+
+    expect(perDay).toEqual([0, 1, 0, 1])
+    expect(await prisma.reminderOccurrence.count()).toBe(2)
+  })
+
   it('提醒的执行人不为空时只通知该成员', async () => {
     const other = await register('sc_other1')
     await join(other)

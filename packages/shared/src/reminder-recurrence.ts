@@ -182,6 +182,11 @@ export interface ComputeDueAtParams {
   rrule?: string | null
   timezone: string
   after: Date
+  /**
+   * 周期对齐的锚点，传提醒的创建时刻。INTERVAL>1 的网格必须由它决定，
+   * 由 `after` 决定会让"下次"跟着查询日往后跑。缺省时退回 `after`（旧行为）。
+   */
+  anchor?: Date | null
 }
 
 /**
@@ -190,7 +195,7 @@ export interface ComputeDueAtParams {
  * 一条坏提醒不能让整个每分钟扫描崩掉。
  */
 export function computeDueAt(params: ComputeDueAtParams): Date | null {
-  const { type, dueAt, rrule, timezone, after } = params
+  const { type, dueAt, rrule, timezone, after, anchor } = params
 
   if (type === 'ONE_TIME') {
     if (!dueAt) return null
@@ -202,7 +207,8 @@ export function computeDueAt(params: ComputeDueAtParams): Date | null {
   if (!fmt) return null
 
   const afterWall = packWall(wallPartsOf(timezone, fmt, after))
-  const rule = parseRule(rrule, afterWall)
+  const gridWall = anchor ? packWall(wallPartsOf(timezone, fmt, anchor)) : afterWall
+  const rule = parseRule(rrule, gridWall)
   if (!rule) return null
 
   let nextWall: Date | null
@@ -225,6 +231,12 @@ export interface ExpandDueDatesParams {
   to: Date
   /** 上限，默认 500。防止一个长期未跑的提醒一次展开出上万条。 */
   limit?: number
+  /**
+   * 周期对齐的锚点，传提醒的创建时刻。INTERVAL>1 的规则里它决定网格落在哪一天：
+   * 用查询窗口起点对齐，窗口每天前移一次，网格就每天重排一次，"每两天"这一档
+   * 会在某些日子整天扫不出实例（该响的不会响）。缺省时退回 `from`（旧行为）。
+   */
+  anchor?: Date | null
 }
 
 /**
@@ -235,7 +247,7 @@ export interface ExpandDueDatesParams {
  * 此刻不该生成——下一分钟的扫描自然会带上它）。
  */
 export function expandDueDates(params: ExpandDueDatesParams): Date[] {
-  const { rrule, timezone, from, to, limit = 500 } = params
+  const { rrule, timezone, from, to, limit = 500, anchor } = params
   if (to.getTime() < from.getTime()) return []
   if (!isSupportedTimezone(timezone)) return []
   const fmt = safeFormat(timezone)
@@ -243,7 +255,7 @@ export function expandDueDates(params: ExpandDueDatesParams): Date[] {
 
   const fromWall = packWall(wallPartsOf(timezone, fmt, from))
   const toWall = packWall(wallPartsOf(timezone, fmt, to))
-  const rule = parseRule(rrule, fromWall)
+  const rule = parseRule(rrule, anchor ? packWall(wallPartsOf(timezone, fmt, anchor)) : fromWall)
   if (!rule) return []
 
   let walls: Date[]

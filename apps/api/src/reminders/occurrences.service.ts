@@ -100,6 +100,9 @@ export class OccurrencesService {
       timezone: reminder.timezone,
       from,
       to: now,
+      // 网格由创建时刻对齐，不由窗口起点对齐：后者每天前移，INTERVAL=2 的那一档
+      // 会天天重排，结果一条实例都生不出来（该响的药一次都没响）。
+      anchor: reminder.createdAt,
       limit: EXPAND_LIMIT,
     })
     if (candidates.length === 0) return 0

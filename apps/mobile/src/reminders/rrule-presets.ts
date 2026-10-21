@@ -68,13 +68,13 @@ export const RRULE_PRESETS: RrulePreset[] = [
   },
   {
     key: 'weekly',
-    label: '每周同一天',
+    label: '每周一',
     rrule: buildRruleFromUi({ kind: 'weekly', hour: 8, minute: 0, weekday: 0 }),
     preview: (tz) => `每周一 08:00（${tz}）`,
   },
   {
     key: 'monthly',
-    label: '每月同一天',
+    label: '每月 1 日',
     rrule: buildRruleFromUi({ kind: 'monthly', hour: 8, minute: 0 }),
     preview: (tz) => `每月 1 日 08:00（${tz}）`,
   },

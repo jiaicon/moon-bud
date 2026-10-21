@@ -41,6 +41,17 @@ describe('提醒', () => {
       .get(`/api/families/${familyId}/reminders${query}`)
       .set('Authorization', `Bearer ${me.token}`)
 
+  /**
+   * 要让"每天 8 点"成为一条**错过**的提醒，得先真的存在一个已经过去的触发时刻。
+   * 而周期网格由创建时刻对齐（不这么做的代价是"每两天"那一档天天重排、一次都不响），
+   * 刚建好的提醒最近的一次触发必然还在它之后——当场物化就是 0 条。
+   * 这里把 createdAt 推到两天之前，"昨天早上 8 点"这才落到它名下。
+   */
+  const backdate = (id: string) => {
+    const when = new Date(Date.now() - 48 * 3600_000)
+    return prisma.reminder.update({ where: { id }, data: { createdAt: when, updatedAt: when } })
+  }
+
   beforeAll(async () => {
     app = await createTestApp()
     prisma = app.get(PrismaService)
@@ -158,6 +169,7 @@ describe('提醒', () => {
       rrule: 'FREQ=DAILY;BYHOUR=8;BYMINUTE=0',
       timezone: 'Asia/Shanghai',
     }).expect(201)
+    await backdate(r.body.id)
 
     const occ = await occurrences(r.body.id).expect(200)
     expect(occ.body.length).toBeGreaterThan(0)
@@ -179,6 +191,7 @@ describe('提醒', () => {
       rrule: 'FREQ=DAILY;BYHOUR=8;BYMINUTE=0',
       timezone: 'Asia/Shanghai',
     }).expect(201)
+    await backdate(r.body.id)
     const before = await occurrences(r.body.id).expect(200)
     const earliest = before.body.filter((o: { status: string }) => o.status === 'PENDING')[0]
 
@@ -196,6 +209,7 @@ describe('提醒', () => {
       rrule: 'FREQ=DAILY;BYHOUR=8;BYMINUTE=0',
       timezone: 'Asia/Shanghai',
     }).expect(201)
+    await backdate(r.body.id)
 
     const occ = await occurrences(r.body.id).expect(200)
     const firstDue = occ.body[0].id
@@ -221,6 +235,7 @@ describe('提醒', () => {
       timezone: 'Asia/Shanghai',
     }).expect(201)
 
+    await backdate(r.body.id)
     // 先让实例真实存在：取消的语义是对**已生成的实例**生效。
     const occ = await occurrences(r.body.id).expect(200)
     expect(occ.body.length).toBeGreaterThan(0)
@@ -249,6 +264,7 @@ describe('提醒', () => {
       rrule: 'FREQ=DAILY;BYHOUR=8;BYMINUTE=0',
       timezone: 'Asia/Shanghai',
     }).expect(201)
+    await backdate(overdue.body.id)
     // 将来的一次性提醒：既没有实例，也没到期 → 不属于已过期。
     const future = await post({
       childId,
@@ -279,6 +295,7 @@ describe('提醒', () => {
       rrule: 'FREQ=DAILY;BYHOUR=8;BYMINUTE=0',
       timezone: 'Asia/Shanghai',
     }).expect(201)
+    await backdate(missed.body.id)
     const upcoming = await post({
       childId,
       title: '还没到',
@@ -302,6 +319,7 @@ describe('提醒', () => {
       rrule: 'FREQ=DAILY;BYHOUR=8;BYMINUTE=0',
       timezone: 'Asia/Shanghai',
     }).expect(201)
+    await backdate(r.body.id)
     const occ = await occurrences(r.body.id).expect(200)
     const first = occ.body.filter(
       (o: { status: string; dueAt: string }) => o.status === 'PENDING' && Date.parse(o.dueAt) < Date.now(),

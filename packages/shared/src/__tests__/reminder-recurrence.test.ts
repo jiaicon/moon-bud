@@ -257,3 +257,62 @@ describe('isSupportedTimezone', () => {
     expect(isSupportedTimezone({ toString: () => 'Asia/Shanghai' })).toBe(false)
   })
 })
+
+/**
+ * "每两天 08:00"这一档预设带 INTERVAL=2。周期网格必须由一个固定锚点（提醒的创建时刻）
+ * 对齐，不能由每次查询的窗口起点对齐：窗口每天在往前滑，网格就每天重排一次，
+ * 于是这一条提醒要么永远扫不出实例（不响），要么"下次"每天往后跳一天（看着永远到不了）。
+ */
+describe('expandDueDates 的周期对齐用锚点，不用窗口起点', () => {
+  const EVERY_2_DAYS = 'FREQ=DAILY;INTERVAL=2;BYHOUR=8;BYMINUTE=0'
+  const anchor = new Date('2026-10-19T10:00:00+08:00')
+
+  // 调度器每分钟问的是 [now-24h, now)：连着问五天，只有网格上的那天该有货。
+  const dayWindow = (day: number) => ({
+    from: new Date(`2026-10-${day}T00:00:00+08:00`),
+    to: new Date(`2026-10-${day + 1}T00:00:00+08:00`),
+  })
+
+  it('锚点之后第二个网格日的那一次，窗口滑到那天就扫得出来', () => {
+    expect(
+      expandDueDates({ rrule: EVERY_2_DAYS, timezone: TZ, anchor, ...dayWindow(21) }).map((d) =>
+        d.toISOString(),
+      ),
+    ).toEqual(['2026-10-21T00:00:00.000Z'])
+  })
+
+  it('连着五天各扫一遍，恰好扫出 21 日和 23 日两次，间隔真的是两天', () => {
+    const hitDays = [20, 21, 22, 23, 24]
+      .flatMap((day) => expandDueDates({ rrule: EVERY_2_DAYS, timezone: TZ, anchor, ...dayWindow(day) }))
+      .map((d) => d.getUTCDate())
+    expect(hitDays).toEqual([21, 23])
+  })
+
+  it('没有锚点时仍按窗口起点对齐（旧行为，别的调用方不受影响）', () => {
+    const withoutAnchor = expandDueDates({ rrule: EVERY_2_DAYS, timezone: TZ, ...dayWindow(20) })
+    expect(withoutAnchor.map((d) => d.toISOString())).toEqual(['2026-10-20T00:00:00.000Z'])
+  })
+
+  it('锚点当天已经过了 08:00，就不会再补出一条"创建之前就该做"的欠账', () => {
+    expect(
+      expandDueDates({ rrule: 'FREQ=DAILY;BYHOUR=8;BYMINUTE=0', timezone: TZ, anchor, ...dayWindow(19) }),
+    ).toEqual([])
+  })
+})
+
+describe('computeDueAt 的"下次"落在同一个网格上，不会跟着查询日往后跑', () => {
+  const EVERY_2_DAYS = 'FREQ=DAILY;INTERVAL=2;BYHOUR=8;BYMINUTE=0'
+  const anchor = new Date('2026-10-19T10:00:00+08:00')
+
+  it('10 月 20 日问，答 21 日 08:00', () => {
+    expect(
+      computeDueAt({ type: 'RECURRING', rrule: EVERY_2_DAYS, timezone: TZ, anchor, after: new Date('2026-10-20T10:00:00+08:00') })?.toISOString(),
+    ).toBe('2026-10-21T00:00:00.000Z')
+  })
+
+  it('10 月 21 日 09:00 再问，答 23 日而不是 22 日：这一次确实刚过完，下次在两天后', () => {
+    expect(
+      computeDueAt({ type: 'RECURRING', rrule: EVERY_2_DAYS, timezone: TZ, anchor, after: new Date('2026-10-21T09:00:00+08:00') })?.toISOString(),
+    ).toBe('2026-10-23T00:00:00.000Z')
+  })
+})

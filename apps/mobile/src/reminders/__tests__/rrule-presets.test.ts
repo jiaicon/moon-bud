@@ -7,6 +7,15 @@ describe('rrule 预设', () => {
     for (const p of RRULE_PRESETS) expect(p.label.length).toBeGreaterThan(0)
   })
 
+  /**
+   * 规则里钉死的是周一、是 1 号，chip 却写"同一天"：周五建的人以为每月 15 号，
+   * 下面的预览行又写着"每周一 08:00"——同一屏两句话，家长信了错的那句。
+   */
+  it('预设标签说实话：钉死哪天就说哪天，不许叫"同一天"', () => {
+    expect(RRULE_PRESETS.find((p) => p.key === 'weekly')?.label).toBe('每周一')
+    expect(RRULE_PRESETS.find((p) => p.key === 'monthly')?.label).toBe('每月 1 日')
+  })
+
   it('buildRruleFromUi 产出合法 rrule 片段', () => {
     expect(buildRruleFromUi({ kind: 'daily', hour: 8, minute: 0 })).toBe('FREQ=DAILY;BYHOUR=08;BYMINUTE=00')
     expect(buildRruleFromUi({ kind: 'everyNDays', hour: 7, minute: 30, n: 2 })).toBe('FREQ=DAILY;INTERVAL=2;BYHOUR=07;BYMINUTE=30')

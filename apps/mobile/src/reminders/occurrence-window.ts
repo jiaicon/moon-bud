@@ -5,6 +5,11 @@ export interface WindowSource {
   dueAt: string | null
   rrule: string | null
   timezone: string
+  /**
+   * 提醒的创建时刻：INTERVAL>1 的周期网格由它对齐。不传就退回"窗口起点"，
+   * 而窗口每次进前台都往前滑，"每两天"那一档会天天重排，响的那天跟着漂。
+   */
+  createdAt?: string | null
 }
 
 /**
@@ -33,11 +38,13 @@ export function occurrencesWithinWindow(
   }
 
   if (!source.rrule) return []
+  const anchor = source.createdAt ? new Date(source.createdAt) : null
   const listed = expandDueDates({
     rrule: source.rrule,
     timezone: source.timezone,
     from: now,
     to: new Date(endMs),
+    anchor: anchor && !Number.isNaN(anchor.getTime()) ? anchor : null,
   })
   return listed.filter((at) => at.getTime() > now.getTime() && at.getTime() <= endMs)
 }

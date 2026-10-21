@@ -32,6 +32,21 @@ describe('本地排期的未来窗口', () => {
     for (const instant of at) expect(clockIn('Asia/Shanghai', instant)).toBe('08:30')
   })
 
+  it('每两天的网格由创建时刻对齐：晚两天进前台，该排的还是那天', () => {
+    // 10-19 10:00（上海）创建的"每隔两天 08:00"，网格因此是 21、23……
+    const everyTwoDays = {
+      type: 'RECURRING' as const,
+      dueAt: null,
+      rrule: 'FREQ=DAILY;INTERVAL=2;BYHOUR=08;BYMINUTE=00',
+      timezone: 'Asia/Shanghai',
+      createdAt: '2026-10-19T02:00:00.000Z',
+    }
+    // 20 号 17:00（上海）进前台，往后看三天：21 号那次必须在表里。
+    expect(
+      occurrencesWithinWindow(everyTwoDays, new Date('2026-10-20T09:00:00.000Z')).map((d) => d.toISOString()),
+    ).toEqual(['2026-10-21T00:00:00.000Z', '2026-10-23T00:00:00.000Z'])
+  })
+
   it('一次性提醒：还没到就排一次，已过就什么都不排', () => {
     const soon = new Date(NOW.getTime() + 3_600_000).toISOString()
     expect(occurrencesWithinWindow({ type: 'ONE_TIME', dueAt: soon, rrule: null, timezone: 'Asia/Shanghai' }, NOW)).toHaveLength(1)

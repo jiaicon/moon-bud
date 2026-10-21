@@ -1,0 +1,61 @@
+# 月芽生产编排（腾讯云那台 1.9G 内存的机器）。
+#
+# 为什么不复用仓库根的 docker-compose.yml：那一份是开发用的，它把 Postgres 发布到
+# 宿主 5433、把 API 发布到宿主 3000。这台机器上 3000 已经跑着别的项目、5433 已经是
+# 另一个 postgres 容器——照抄会撞端口，或者更糟：撞成功了，把别人的服务换成我们的。
+# 所以这里只发布 127.0.0.1:3100，Postgres 一个端口都不发布（容器内网互通，
+# nginx 就在本机反代），公网上除了 80/443 不该有月芽的任何入口。
+#
+# 用法（在**仓库根**执行，密钥放在仓库根的 .env，那份文件不进 git）：
+#   docker compose --env-file .env -f deploy/compose.prod.yml up -d
+# `--env-file` 是刻意的：compose 找 .env 的位置跟着 compose 文件所在目录走，
+# 不加它就会去 deploy/ 里找，然后以 "JWT_ACCESS_SECRET is required" 失败。
+name: moonbud
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: moonbud-postgres
+    restart: unless-stopped
+    environment:
+      # 生产一律要求显式值：开发那份 compose 里的 moonbud_dev 默认值一旦跟着上线，
+      # 等于公开库密码。这里用 :? 让它"缺就起不来"，而不是"起来了但密码是默认的"。
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+    volumes:
+      - moonbud-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    # build 的 context 相对于本文件所在目录，`..` 即仓库根：镜像里的 workspace
+    # 依赖 @moonbud/shared，上下文小了就解析不到。镜像已存在时 up 不会重新构建，
+    # 要更新就加 --build（1.9G 内存的机器上构建过 nest 是可行的，实测过）。
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: moonbud-api:prod
+    container_name: moonbud-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-2h}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-30d}
+      # 提醒扫描的 cron 每分钟一次；显式写出，免得以后有人以为它是默认关的。
+      SCHEDULER_ENABLED: 'true'
+    ports:
+      - '127.0.0.1:3100:3000'
+
+volumes:
+  moonbud-pgdata:

@@ -79,23 +79,26 @@ export class ResetRequestService {
     })
 
     // 一个人可能同时管着请求者的好几个家庭：合并成一条，别刷屏。
-    const namesByManager = new Map<string, Set<string>>()
+    // 名字是用来念的，id 是用来落的——两个家庭同名时只能信 id。
+    const seen = new Map<string, { familyIds: string[]; names: Set<string> }>()
     for (const manager of managers) {
       const family = families.find((f) => f.id === manager.familyId)
       if (!family) continue
-      const names = namesByManager.get(manager.userId) ?? new Set<string>()
-      names.add(family.name)
-      namesByManager.set(manager.userId, names)
+      const entry = seen.get(manager.userId) ?? { familyIds: [], names: new Set<string>() }
+      if (!entry.familyIds.includes(family.id)) entry.familyIds.push(family.id)
+      entry.names.add(family.name)
+      seen.set(manager.userId, entry)
     }
 
-    for (const [managerId, names] of namesByManager) {
-      const family = families.find((f) => names.has(f.name))
+    for (const [managerId, entry] of seen) {
       await this.prisma.notification.create({
         data: {
           userId: managerId,
-          familyId: family?.id ?? '',
+          // 取这位管理员确实管理着的那一家：客户端点开通知会据此切到对应的
+          // 成员列表，指到一间他不在里面的家庭等于把人带进 403。
+          familyId: entry.familyIds[0],
           title: '有人需要重置密码',
-          body: `${username} 提交了找回密码请求（家庭：${[...names].join('、')}）。`
+          body: `${username} 提交了找回密码请求（家庭：${[...entry.names].join('、')}）。`
             + '请在成员列表里为该账号设置临时密码。',
         },
       })

@@ -93,6 +93,9 @@ export class AuthService {
         passwordHash: await hashPassword(dto.newPassword),
         // 改完密码就不再处于"被重置"状态，客户端可以离开强制改密页。
         mustChangePassword: false,
+        // 和上面同一行写入：这一时刻之前签发的 access token 全部作废。
+        // 不填的话，拿到旧 token 的人在你改完密码后还能继续用满 2 小时。
+        passwordChangedAt: new Date(),
       },
     })
 

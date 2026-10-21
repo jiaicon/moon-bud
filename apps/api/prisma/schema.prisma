@@ -56,6 +56,10 @@ model User {
   timezone           String
   /// 用临时密码登录后为 true，客户端强制跳转修改密码。
   mustChangePassword Boolean   @default(false)
+  /// 这一时刻之前签发的 access token 一律作废：无状态的 JWT 撤不掉，只能拿 token 里的
+  /// pwdAt 水位和它比。迁移时存量行填成注册时间（那条记录之前不可能有还在用的会话），
+  /// 所以 null 只意味着"无法判断"，此时一律放行。
+  passwordChangedAt  DateTime? @db.Timestamptz(3)
   createdAt          DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
 

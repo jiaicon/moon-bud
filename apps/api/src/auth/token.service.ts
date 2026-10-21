@@ -41,8 +41,15 @@ export class TokenService {
   }
 
   async issue(userId: string, username: string): Promise<IssuedTokens> {
+    // 把"当时的密码水位"写进 access token：无状态的 JWT 撤不掉，只能让校验方
+    // 拿这个毫秒时间戳和库里的当前值比。iat 只有秒精度，同一秒内改完密码再签发
+    // 的新 token 会被自己判成旧的。
+    const { passwordChangedAt } = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { passwordChangedAt: true },
+    })
     const accessToken = await this.jwt.signAsync(
-      { sub: userId, username },
+      { sub: userId, username, pwdAt: passwordChangedAt?.getTime() },
       { secret: this.accessSecret, expiresIn: this.accessTtl },
     )
 

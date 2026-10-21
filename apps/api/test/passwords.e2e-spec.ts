@@ -54,6 +54,71 @@ describe('密码', () => {
       .expect(200)
   })
 
+  it('改密后，另一台设备上还没过期的 access token 立刻作废', async () => {
+    const reg = await register({ username: 'pw_stolen' }).expect(201)
+    // access token 是无状态的，TTL 默认 2 小时：此刻它在字面上仍然有效。
+    const stolen = reg.body.accessToken as string
+    await request(app.getHttpServer()).get('/api/me').set('Authorization', `Bearer ${stolen}`).expect(200)
+
+    const changed = await request(app.getHttpServer())
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${reg.body.accessToken}`)
+      .send({ oldPassword: 'pass12345', newPassword: 'newpass12345' })
+      .expect(200)
+
+    // 撤销了全部 refresh 会话却留着 access 不管，等于"改了密码、别人还能继续用"。
+    const revoked = await request(app.getHttpServer())
+      .get('/api/me')
+      .set('Authorization', `Bearer ${stolen}`)
+      .expect(401)
+    // 客户端把这行文案直接显示给用户，英文到这里就是漏网。
+    expect(revoked.body.message).toContain('密码已变更')
+    await request(app.getHttpServer())
+      .get('/api/me')
+      .set('Authorization', `Bearer ${changed.body.accessToken}`)
+      .expect(200)
+
+    // 改密之后续期出来的 token 也算"改密之后"：水位要跟着新 token 走，
+    // 否则用户只能重新登录一次才能用。
+    const renewed = await request(app.getHttpServer())
+      .post('/api/auth/refresh')
+      .send({ refreshToken: changed.body.refreshToken })
+      .expect(200)
+    await request(app.getHttpServer())
+      .get('/api/me')
+      .set('Authorization', `Bearer ${renewed.body.accessToken}`)
+      .expect(200)
+  })
+
+  it('管理员重置临时密码，本人那一台正在用的会话也被踢下线', async () => {
+    const a = await register({ username: 'pw_kick_owner' }).expect(201)
+    const b = await register({ username: 'pw_kick_member' }).expect(201)
+    const family = await request(app.getHttpServer())
+      .post('/api/families')
+      .set('Authorization', `Bearer ${a.body.accessToken}`)
+      .send({ name: 'F' })
+      .expect(201)
+    const bRow = await prisma.familyMember.create({
+      data: { familyId: family.body.id, userId: b.body.user.id, role: 'MEMBER' },
+    })
+
+    // B 正登录着用，密码被家人改掉了——B 的会话不该还能继续写数据。
+    await request(app.getHttpServer())
+      .get('/api/me')
+      .set('Authorization', `Bearer ${b.body.accessToken}`)
+      .expect(200)
+
+    await request(app.getHttpServer())
+      .post(`/api/families/${family.body.id}/members/${bRow.id}/reset-password`)
+      .set('Authorization', `Bearer ${a.body.accessToken}`)
+      .expect(200)
+
+    await request(app.getHttpServer())
+      .get('/api/me')
+      .set('Authorization', `Bearer ${b.body.accessToken}`)
+      .expect(401)
+  })
+
   it('旧密码错误时拒绝修改，且原密码仍然有效', async () => {
     const reg = await register({ username: 'pw_u2' }).expect(201)
     await request(app.getHttpServer())
@@ -245,6 +310,35 @@ describe('密码', () => {
       expect(
         await prisma.notification.count({ where: { userId: owner.body.user.id } }),
       ).toBe(1)
+    })
+
+    it('请求人名下有两个同名家庭时，通知挂在管理员真的在的那一家', async () => {
+      const manager = await register({ username: 'rr_mgr' }).expect(201)
+      const seeker = await register({ username: 'rr_seeker' }).expect(201)
+
+      const createFamily = (name: string) =>
+        request(app.getHttpServer())
+          .post('/api/families')
+          .set('Authorization', `Bearer ${seeker.body.accessToken}`)
+          .send({ name })
+          .expect(201)
+
+      // 两个都叫"奶奶家"：前一个只有请求人自己，后一个才有管理员。
+      const onlySeeker = await createFamily('奶奶家')
+      const shared = await createFamily('奶奶家')
+      await prisma.familyMember.create({
+        data: { familyId: shared.body.id, userId: manager.body.user.id, role: 'ADMIN' },
+      })
+
+      await requestReset('rr_seeker').expect(202)
+
+      const [notification] = await prisma.notification.findMany({
+        where: { userId: manager.body.user.id },
+      })
+      // 按名字回找家庭会找到请求人独占的那一家——管理员不在那里，
+      // 点开通知看到的成员列表与这条请求无关。
+      expect(notification.familyId).toBe(shared.body.id)
+      expect(notification.body).toContain('奶奶家')
     })
   })
 })

@@ -129,7 +129,7 @@ export class MembersService {
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: target.userId },
-        data: { passwordHash: tokenHash, mustChangePassword: true },
+        data: { passwordHash: tokenHash, mustChangePassword: true, passwordChangedAt: new Date() },
       }),
       // 审计线索：谁在什么时候给谁发过临时密码。
       this.prisma.passwordResetToken.create({

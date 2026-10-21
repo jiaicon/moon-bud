@@ -23,7 +23,8 @@ describe("孩子名单：还不知道 ≠ 没有", () => {
 
   it('记录页在孩子为空的提示之前先挡住"还没读到"', () => {
     const source = read('pages/event-list/index.vue')
-    const gate = source.indexOf('v-else-if="!childrenLoaded"')
+    // 游客现在也走这一格骨架，所以挡在它前面的是"还没读到 + 不是游客"两件事。
+    const gate = source.indexOf('v-else-if="!isGuest && !childrenLoaded"')
     const lie = source.indexOf('这个家庭还没有孩子')
     expect(gate).toBeGreaterThan(-1)
     expect(gate, '还没读到的那一瞬会说"这个家庭还没有孩子"').toBeLessThan(lie)

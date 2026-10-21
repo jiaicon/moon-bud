@@ -37,12 +37,15 @@ function nextDue(reminder: ReminderDto, now: Date): Date | null {
     const at = new Date(reminder.dueAt)
     if (!Number.isNaN(at.getTime()) && at.getTime() > now.getTime()) return at
   }
+  const anchor = new Date(reminder.createdAt)
   return computeDueAt({
     type: reminder.type,
     dueAt: reminder.dueAt ? new Date(reminder.dueAt) : null,
     rrule: reminder.rrule,
     timezone: reminder.timezone,
     after: now,
+    // "下次"要和调度器落在同一张网格上，否则每 N 天那一档的卡片日期天天往后跑。
+    anchor: Number.isNaN(anchor.getTime()) ? null : anchor,
   })
 }
 

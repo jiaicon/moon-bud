@@ -1,20 +1,26 @@
 <script setup lang="ts">
 import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
+import { blockGuestDeepLink } from '../../guest/deep-link'
 import { computed, ref } from 'vue'
 import { notificationsApi } from '../../api/endpoints'
+import { notificationTarget } from '../../notifications/routing'
 import { refreshUnreadTabBadge } from '../../notifications/tab-badge'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useAuthStore } from '../../stores/auth'
+import { useFamilyStore } from '../../stores/family'
 import { wallStamp } from '../../utils/wall-time'
 import type { NotificationDto } from '@moonbud/shared'
 
 const authStore = useAuthStore()
+const familyStore = useFamilyStore()
 const PAGE_SIZE = 30
 
 const items = ref<NotificationDto[]>([])
 const total = ref(0)
 const page = ref(1)
 const loading = ref(false)
+// "0 条未读"是一句关于服务端的话，取回来之前没有资格说它。
+const loaded = ref(false)
 const error = ref<string | null>(null)
 const unreadOnly = ref(true)
 
@@ -47,6 +53,7 @@ async function run(reset: boolean): Promise<void> {
     items.value = reset ? res.items : [...items.value, ...res.items]
     total.value = res.total
     page.value = next
+    loaded.value = true
   } catch (err) {
     error.value = err instanceof Error ? err.message : '通知加载失败'
   } finally {
@@ -67,13 +74,25 @@ async function markRead(item: NotificationDto): Promise<void> {
   }
 }
 
-/** 点击通知要落到那条提醒上：通知只是路标，家长关心的是"该做什么"。 */
+/** 通知只是路标：点它要落到那件事发生的地方，而不是统一推到提醒页。 */
 async function open(item: NotificationDto): Promise<void> {
   await markRead(item)
-  // switchTab 带不了参数，用一次性 storage 把列表切回"待办"：
-  // 停在"已完成"里点一条到点的通知，看到的是无关的旧记录。
-  uni.setStorageSync('reminderTabFocus', 'ACTIVE')
-  uni.switchTab({ url: '/pages/reminder-list/index' })
+  const target = notificationTarget(item)
+  switch (target.kind) {
+    case 'members':
+      // 找回请求是关于某一个家庭的：不去切成通知里那一家的话，
+      // 管理员站在当前家庭里找不到请求者，只会以为这条通知是假的。
+      if (target.familyId && target.familyId !== familyStore.currentFamilyId) {
+        familyStore.switchFamily(target.familyId)
+      }
+      uni.navigateTo({ url: '/pages/member-list/index' })
+      return
+    case 'reminders':
+      // switchTab 带不了参数，用一次性 storage 把列表切回"待办"：
+      // 停在"已完成"里点一条到点的通知，看到的是无关的旧记录。
+      uni.setStorageSync('reminderTabFocus', 'ACTIVE')
+      uni.switchTab({ url: '/pages/reminder-list/index' })
+  }
 }
 
 async function readAll(): Promise<void> {
@@ -109,6 +128,7 @@ function fmt(iso: string): string {
 let ready = false
 
 onLoad(async () => {
+  if (await blockGuestDeepLink()) return
   // 深链/冷启动直接进这一页时 user 还是 null，时区会退回兜底值，第一屏就念错钟点。
   if (!authStore.user) await authStore.bootstrap()
   await load(true)
@@ -126,7 +146,8 @@ onPullDownRefresh(() => {
   <theme-root>
     <view class="page">
       <view class="head">
-        <text class="head__count">{{ unreadOnly ? `${total} 条未读` : `${total} 条通知` }}</text>
+        <text v-if="loaded" class="head__count">{{ unreadOnly ? `${total} 条未读` : `${total} 条通知` }}</text>
+        <text v-else class="head__count">正在数…</text>
         <view class="head__actions">
           <text class="link" @click="toggleFilter">{{ unreadOnly ? '查看全部' : '只看未读' }}</text>
           <text class="link" @click="readAll">全部已读</text>

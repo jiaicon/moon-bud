@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import { blockGuestDeepLink } from '../../guest/deep-link'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { invitesApi } from '../../api/endpoints'
 import { useChildStore } from '../../stores/child'
@@ -70,7 +71,8 @@ async function join(): Promise<void> {
   }
 }
 
-onLoad(() => {
+onLoad(async () => {
+  if (await blockGuestDeepLink()) return
   void familyStore.load()
 })
 </script>

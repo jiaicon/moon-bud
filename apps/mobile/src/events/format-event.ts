@@ -16,7 +16,7 @@ const LABELS: Record<string, string> = {
   poor: '睡得差',
   pee: '小便',
   poo: '大便',
-  mixed: '大小便',
+  mixed: '混合',
   axillary: '腋下',
   ear: '耳温',
   forehead: '额温',

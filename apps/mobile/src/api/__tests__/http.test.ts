@@ -242,6 +242,44 @@ describe('会话失效的出口', () => {
     expect(onExpired).toHaveBeenCalledTimes(1)
   })
 
+  // 真实的中途过期长这样：access token 到期 → 请求 401 → 拿 refresh token 去续，
+  // 服务端因为 refresh 也过期/被撤销回一个 401。auth store 的 refreshHandler 抛的是
+  // ApiRequestError，而这一支原本直接 rethrow，于是"回首页游客态 + 一句提示"永远不会响，
+  // 人停留在原页面看到一条错误，会话还留着，怎么做都是同样的 401。
+  it('续期自己返回 401 时同样算会话失效：那正是 refresh token 过期', async () => {
+    vi.resetModules()
+    const { ApiRequestError } = await import('../errors')
+    const { apiRequest, setAccessToken, setRefreshHandler, setSessionExpiredHandler } = await import('../http')
+    const onExpired = vi.fn()
+    setSessionExpiredHandler(onExpired)
+    setAccessToken('at')
+    setRefreshHandler(async () => {
+      throw new ApiRequestError('登录已过期，请重新登录', 401)
+    })
+    uniAny.uni.request = always(401)
+
+    await expect(apiRequest('/me')).rejects.toThrow(/登录/)
+    expect(onExpired).toHaveBeenCalledTimes(1)
+  })
+
+  // 但"续期失败"不等于"会话没了"：断网时 /auth/refresh 根本发不出去。
+  // 这时把人踢回首页等于替他判定登录已过期，而真相是网络不通。
+  it('续期是网络失败时不算会话失效：断网不等于凭证过期', async () => {
+    vi.resetModules()
+    const { ApiRequestError } = await import('../errors')
+    const { apiRequest, setAccessToken, setRefreshHandler, setSessionExpiredHandler } = await import('../http')
+    const onExpired = vi.fn()
+    setSessionExpiredHandler(onExpired)
+    setAccessToken('at')
+    setRefreshHandler(async () => {
+      throw new ApiRequestError('网络连接失败，请检查网络后重试', 0, true)
+    })
+    uniAny.uni.request = always(401)
+
+    await expect(apiRequest('/me')).rejects.toThrow(/网络/)
+    expect(onExpired).not.toHaveBeenCalled()
+  })
+
   it('并发失败只通知一次；重新拿到会话后才会再通知', async () => {
     vi.resetModules()
     const { apiRequest, setAccessToken, setRefreshHandler, setSessionExpiredHandler } = await import('../http')
@@ -261,7 +299,7 @@ describe('会话失效的出口', () => {
     expect(onExpired).toHaveBeenCalledTimes(2)
   })
 
-  it('公开端点的 401 不算会话失效：密码错误不该把人踢回欢迎页', async () => {
+  it('公开端点的 401 不算会话失效：密码错误不该把人踢回首页', async () => {
     vi.resetModules()
     const { apiRequest, setRefreshHandler, setSessionExpiredHandler } = await import('../http')
     const onExpired = vi.fn()
@@ -274,8 +312,8 @@ describe('会话失效的出口', () => {
   })
 
   // 游客的冷启动：App 的 onShow 会问一次未读数，一个"本来就没登录的人"收到 401。
-  // 把这当成会话过期等于把他甩进"登录已过期 → 欢迎页 → onShow → 又 401"的死圈，
-  // 圈里的手势还会盖掉欢迎页按钮：点"重新登录"没有反应。
+  // 把这当成会话过期等于把他甩进"登录已过期 → 首页游客态 → 又 401"的死圈，
+  // 圈里的手势还会盖掉游客引导那颗按钮：点"登录 / 注册"没有反应。
   it('本地根本没有会话时的 401 不算会话失效：没登录过的人没有"过期"可言', async () => {
     vi.resetModules()
     const { apiRequest, setAccessToken, setRefreshHandler, setSessionExpiredHandler } = await import('../http')

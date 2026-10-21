@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onLoad, onShow } from '@dcloudio/uni-app'
+import { blockGuestDeepLink } from '../../guest/deep-link'
 import { computed, ref } from 'vue'
 import { membersApi } from '../../api/endpoints'
 import ThemeRoot from '../../components/ThemeRoot.vue'
@@ -147,6 +148,7 @@ const goFamilySettings = () => uni.navigateTo({ url: '/pages/family-settings/ind
 
 let ready = false
 onLoad(async () => {
+  if (await blockGuestDeepLink()) return
   await familyStore.load()
   await load()
   ready = true

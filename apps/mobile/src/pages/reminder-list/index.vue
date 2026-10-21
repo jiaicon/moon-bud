@@ -3,14 +3,19 @@ import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
 import type { MemberDto, ReminderDto, ReminderListFilter } from '@moonbud/shared'
 import { membersApi, remindersApi } from '../../api/endpoints'
+import { confirmLoginGate } from '../../guest/gate'
+import { guardForcedChange } from '../../utils/forced-change'
 import { resyncActiveReminderSchedules, assigneeLabel } from '../../notifications/reminder-arming'
 import { refreshUnreadTabBadge } from '../../notifications/tab-badge'
 import { reminderCardLabel } from '../../reminders/card-label'
 import EmptyState from '../../components/EmptyState.vue'
+import GuestGuide from '../../components/GuestGuide.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
+import { useAuthStore } from '../../stores/auth'
 import { useFamilyStore } from '../../stores/family'
 
 const TABS = ['待办', '已过期', '已完成']
+const PAGE_SIZE = 50
 const FILTERS: ReminderListFilter[] = ['ACTIVE', 'OVERDUE', 'DONE']
 const EMPTY_HINTS = [
   '睡前的维生素、明天的体检，都可以让它替你记住。',
@@ -18,13 +23,20 @@ const EMPTY_HINTS = [
   '一次性提醒完成后归档到这里；重复提醒只完当天那一次，不会离开待办。',
 ]
 
+const authStore = useAuthStore()
 const familyStore = useFamilyStore()
+
+const isGuest = computed(() => authStore.isGuest)
 
 const tabIndex = ref(0)
 const reminders = ref<ReminderDto[]>([])
 const members = ref<MemberDto[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
+// 服务端说的总数与已经拿到手的条数：只有这两个数能证明"这一档还有没显示的"。
+const total = ref(0)
+const page = ref(1)
+const hasMore = computed(() => reminders.value.length < total.value)
 
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
 
@@ -39,22 +51,26 @@ const whoLabel = (assigneeId: string | null) => assigneeLabel(members.value, ass
  */
 let queue: Promise<void> = Promise.resolve()
 
-function load(): Promise<void> {
-  const next = queue.then(() => run())
+function load(reset = true): Promise<void> {
+  const next = queue.then(() => run(reset))
   queue = next.catch(() => undefined)
   return next
 }
 
-async function run(): Promise<void> {
+async function run(reset: boolean): Promise<void> {
   if (!familyId.value) return
   loading.value = true
   error.value = null
+  const target = reset ? 1 : page.value + 1
   try {
-    const [page, list] = await Promise.all([
-      remindersApi.list(familyId.value, FILTERS[tabIndex.value], { pageSize: 50 }),
+    const [res, list] = await Promise.all([
+      remindersApi.list(familyId.value, FILTERS[tabIndex.value], { page: target, pageSize: PAGE_SIZE }),
       members.value.length ? Promise.resolve(members.value) : membersApi.list(familyId.value),
     ])
-    reminders.value = page.items
+    // 第一页要换掉旧内容，后面的页是接着往下长：写成覆盖会让人以为卡片被吞了。
+    reminders.value = reset ? res.items : [...reminders.value, ...res.items]
+    total.value = res.total
+    page.value = target
     members.value = list
   } catch (err) {
     error.value = err instanceof Error ? err.message : '提醒加载失败'
@@ -80,7 +96,18 @@ async function complete(reminder: ReminderDto): Promise<void> {
   }
 }
 
+/**
+ * 游客看得到分段与提醒中心，点其中任何一处只问一句。判断集中在这里，
+ * 不散进模板：加一格分段就有人忘记问。
+ */
+function gate(key: string): boolean {
+  if (!authStore.isGuest) return false
+  void confirmLoginGate(key)
+  return true
+}
+
 function pickTab(index: number): void {
+  if (gate('提醒分段')) return
   if (tabIndex.value === index) return
   tabIndex.value = index
   void load()
@@ -89,25 +116,46 @@ function pickTab(index: number): void {
 const goDetail = (id: string) => uni.navigateTo({ url: `/pages/reminder-form/index?id=${id}` })
 const goCreate = () => uni.navigateTo({ url: '/pages/reminder-form/index' })
 const goFamily = () => uni.navigateTo({ url: '/pages/family-select/index' })
-const goNotifications = () => uni.navigateTo({ url: '/pages/notification-center/index' })
+
+function goNotifications(): void {
+  if (gate('/pages/notification-center/index')) return
+  uni.navigateTo({ url: '/pages/notification-center/index' })
+}
 
 // onLoad 已经拉过；onShow 只代表"从别处回到本页"。两边都拉会让首屏发双份请求。
-let ready = false
+/**
+ * 这一份实例在"游客 → 登录 → 切回本页"时不会被重建：记一下它为哪个账号拉过家庭列表。
+ * 不记的话刚登录的人会站在"还没有家庭"上——那是上一个身份（没人）留下的骨架。
+ */
+let loadedForUser: string | null = null
 
-onLoad(async () => {
-  await familyStore.load()
+/** 进入这一屏：会话没落定之前不读，游客这一屏一条请求都不发。 */
+async function enter(): Promise<void> {
+  // isLoggedIn 是内存态，冷启动第一帧必然是 null；不等它就判游客，
+  // 老用户打开应用会先看一眼"来登录吧"。
+  if (authStore.session === 'unknown') await authStore.bootstrap()
+  if (!authStore.isLoggedIn) return
+  const userId = authStore.user?.id ?? ''
+  if (loadedForUser !== userId) {
+    await familyStore.load()
+    loadedForUser = userId
+  }
   await load()
-  ready = true
-})
+}
+
+onLoad(() => void enter())
 
 onShow(() => {
+  guardForcedChange(authStore.mustChangePassword)
+  // 这一格头顶的数字就是本页的入口信号：读完通知切回来要跟着掉。
+  // 游客（以及会话还没问出来的那一趟）不画它——那是上一个账号留下的未读数。
+  if (!authStore.isLoggedIn) return
   // 提醒中心点了某条通知跳回来时，要落在"待办"而不是上次停留的分段。
   if (uni.getStorageSync('reminderTabFocus') === 'ACTIVE') {
     uni.removeStorageSync('reminderTabFocus')
     tabIndex.value = 0
   }
-  if (ready) void load()
-  // 这一格头顶的数字就是本页的入口信号：读完通知切回来要跟着掉。
+  void enter()
   void refreshUnreadTabBadge()
 })
 
@@ -119,8 +167,16 @@ onPullDownRefresh(() => {
 <template>
   <theme-root>
     <view class="page">
+      <!-- 会话还没问出来的那一瞬，无论是"来登录吧"还是"去创建家庭"，两句都是谎话。 -->
       <empty-state
-        v-if="!familyId"
+        v-if="authStore.session === 'unknown'"
+        icon="🌙"
+        title="正在确认登录状态"
+        hint="稍一下下，这一家的提醒马上就来。"
+      />
+
+      <empty-state
+        v-else-if="!isGuest && !familyId"
         icon="🏠"
         title="还没有家庭"
         hint="创建一个家庭，提醒才能分给家人。"
@@ -129,6 +185,7 @@ onPullDownRefresh(() => {
       />
 
       <template v-else>
+        <!-- 分段与提醒中心和会员看到的是同一副骨架：复制两遍就会有一份跟着不上改动。 -->
         <u-subsection :list="TABS" :current="tabIndex" active-color="var(--mb-color-primary)" @change="pickTab" />
 
         <view class="link-row">
@@ -153,8 +210,11 @@ onPullDownRefresh(() => {
 
         <view v-if="reminders.length" class="bottom-spacer" />
 
+        <!-- 空白区：游客看到的是"来登录吧"，会员看到的是"这一档没有提醒"。 -->
+        <guest-guide v-if="isGuest" page="reminders" />
+
         <empty-state
-          v-if="!loading && !reminders.length && !error"
+          v-else-if="!loading && !reminders.length && !error"
           :icon="FILTERS[tabIndex] === 'DONE' ? '✅' : '⏰'"
           :title="`没有${TABS[tabIndex]}的提醒`"
           :hint="EMPTY_HINTS[tabIndex]"
@@ -162,9 +222,12 @@ onPullDownRefresh(() => {
           @action="goCreate"
         />
         <text v-if="loading" class="page__loading">加载中…</text>
+        <view v-if="!loading && hasMore" class="more" @click="load(false)">
+          <text class="more__label">加载更多</text>
+        </view>
       </template>
 
-      <view v-if="familyId" class="fab" @click="goCreate"><text class="fab__label">＋</text></view>
+      <view v-if="familyId && !isGuest" class="fab" @click="goCreate"><text class="fab__label">＋</text></view>
     </view>
   </theme-root>
 </template>
@@ -260,6 +323,16 @@ onPullDownRefresh(() => {
   font-size: 24rpx;
   color: var(--mb-color-text-disabled);
   text-align: center;
+}
+
+.more {
+  padding: 20rpx;
+  text-align: center;
+}
+
+.more__label {
+  font-size: 24rpx;
+  color: var(--mb-color-primary);
 }
 
 .fab {

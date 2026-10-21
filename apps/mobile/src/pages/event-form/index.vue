@@ -8,6 +8,7 @@ import {
   type EventType,
 } from '@moonbud/shared'
 import { onLoad } from '@dcloudio/uni-app'
+import { blockGuestDeepLink } from '../../guest/deep-link'
 import { computed, reactive, ref } from 'vue'
 import { eventsApi } from '../../api/endpoints'
 import { EVENT_TYPE_META, fieldsFor, NON_BLOCKING_NOTICES, type FieldSpec } from '../../events/event-fields'
@@ -21,6 +22,7 @@ import { useDupWindowStore } from '../../stores/dup-window'
 import { useFamilyStore } from '../../stores/family'
 import { useOutboxStore } from '../../stores/outbox'
 import { isoFromWallTime, wallFields } from '../../utils/wall-time'
+import { stepBack } from '../../utils/back-nav'
 
 const familyStore = useFamilyStore()
 const childStore = useChildStore()
@@ -126,6 +128,7 @@ function backToGrid(): void {
 }
 
 onLoad(async (query) => {
+  if (await blockGuestDeepLink()) return
   // 记录的起止钟点按账号时区解释，而账号是冷启动静默登录才落到 store 的：
   // 直开深链接时先等它，不然预填出来的是兜底时区的钟点。
   if (!authStore.user) await authStore.bootstrap()
@@ -134,13 +137,15 @@ onLoad(async (query) => {
   if (familyId.value) await childStore.load(familyId.value)
   const requested = String(query?.type ?? '')
   const id = String(query?.id ?? '')
+  // 导航栏是 pages.json 里写死的"记一笔"，编辑时不改口会让人以为在新增一条。
+  uni.setNavigationBarTitle({ title: id ? '编辑记录' : '记一笔' })
   if (id) {
     // 列表页把整条记录交接过来（后端没有 GET /events/:id）。取不到就是交接丢了，
     // 宁可退回新建，也不给一张空白表单让人"改了个不存在的东西"。
     const target = takeForEdit(id)
     if (!target) {
       uni.showToast({ title: '没拿到那条记录，请从列表再点一次', icon: 'none' })
-      setTimeout(() => uni.navigateBack(), 900)
+      setTimeout(() => stepBack(), 900)
       return
     }
     editingId.value = target.id
@@ -241,7 +246,7 @@ async function onSubmit(): Promise<void> {
       const res = await outboxStore.submitCreate(familyId.value, { childId, ...shared })
       uni.showToast({ title: queuedToast(res, '已记录'), icon: 'none' })
     }
-    setTimeout(() => uni.navigateBack(), 600)
+    setTimeout(() => stepBack(), 600)
   } catch (err) {
     uni.showToast({ title: err instanceof Error ? err.message : '保存失败', icon: 'none' })
   } finally {
@@ -257,7 +262,7 @@ function queuedToast(res: { kind: 'saved' | 'queued' }, savedCopy: string): stri
   return res.kind === 'queued' ? '已存到待同步，恢复网络后自动上传' : savedCopy
 }
 
-const goBack = () => uni.navigateBack()
+const goBack = () => stepBack()
 </script>
 
 <template>

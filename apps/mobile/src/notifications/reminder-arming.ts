@@ -29,8 +29,30 @@ export function armFromLists(
     dueAt: reminder.dueAt,
     rrule: reminder.rrule,
     timezone: reminder.timezone,
+    // 周期网格的锚点：没有它，"每两天"那一档每次进前台都按"今天"重排一次。
+    createdAt: reminder.createdAt,
   }))
   armReminders(familyId, armable, knownFamilyIds)
+}
+
+/**
+ * 逐页收齐这一家的待办。
+ *
+ * 只取第一页的话，第二页那些提醒既进不了表，也不会被"这一家还剩哪些待办"
+ * 的比对抹掉——排期按半份名单走，人等不到本该响的提醒。服务端一页最多 100，
+ * 十页封顶是给失控局面留的闸：真有几千条待办的家庭，这个应用已经帮不上他了。
+ */
+const PAGE_SIZE = 100
+const MAX_PAGES = 10
+
+async function listAllActive(familyId: string): Promise<ReminderDto[]> {
+  const all: ReminderDto[] = []
+  for (let page = 1; page <= MAX_PAGES; page += 1) {
+    const res = await remindersApi.list(familyId, 'ACTIVE', { page, pageSize: PAGE_SIZE })
+    all.push(...(res.items as ReminderDto[]))
+    if (res.items.length === 0 || all.length >= res.total) return all
+  }
+  return all
 }
 
 /**
@@ -65,12 +87,11 @@ export async function resyncActiveReminderSchedules(): Promise<void> {
   }
 
   try {
-    // pageSize 要和排期看到的范围一致：只看第一页会把第二页的提醒从表里抹掉。
     const [active, members] = await Promise.all([
-      remindersApi.list(familyId, 'ACTIVE', { pageSize: 50 }),
+      listAllActive(familyId),
       membersApi.list(familyId),
     ])
-    armFromLists(familyId, active.items as ReminderDto[], members, knownFamilyIds)
+    armFromLists(familyId, active, members, knownFamilyIds)
   } catch {
     // 拉不到就什么都不动：留着旧的排期，比把表清空更靠近真相。
   }

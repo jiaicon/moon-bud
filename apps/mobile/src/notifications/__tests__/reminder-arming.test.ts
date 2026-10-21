@@ -109,7 +109,27 @@ describe('提醒排期的装配', () => {
     signIn()
     emptyTodo()
     await resyncActiveReminderSchedules()
-    expect(remindersApi.list).toHaveBeenCalledWith('f1', 'ACTIVE', { pageSize: 50 })
+    expect(remindersApi.list).toHaveBeenCalledWith('f1', 'ACTIVE', { page: 1, pageSize: 100 })
+  })
+
+  it('待办超过一页时逐页收齐：第二页的提醒照样要响', async () => {
+    // 只取第一页的话，第二页那几条既不会进表，也不会被"这一家还有哪些待办"
+    // 的判断抹掉——排期按旧的半份名单走，人等不到本该响的提醒。
+    signIn()
+    const many = (from: number, count: number) =>
+      Array.from({ length: count }, (_, i) => recurring({ id: `r${from + i}` }))
+    ;(remindersApi.list as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_f: string, _s: string, opts: { page?: number }) =>
+        opts.page === 2
+          ? { items: many(101, 5), total: 105, page: 2, pageSize: 100 }
+          : { items: many(1, 100), total: 105, page: 1, pageSize: 100 },
+    )
+    ;(membersApi.list as ReturnType<typeof vi.fn>).mockResolvedValue(members)
+
+    await resyncActiveReminderSchedules()
+
+    expect(remindersApi.list).toHaveBeenCalledTimes(2)
+    expect(rows().some((r) => r.owner === 'r105')).toBe(true)
   })
 
   it('没登录时一个请求都不发', async () => {

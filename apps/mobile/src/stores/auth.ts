@@ -6,7 +6,9 @@ import { authApi, meApi } from '../api/endpoints'
 import { clearLocalNotifications } from '../notifications/local-notify'
 import { resetDueWatch, startDueWatch } from '../notifications/due-watch'
 import { applyUnreadBadge, refreshUnreadTabBadge } from '../notifications/tab-badge'
-import { clearPreviewVisited } from '../utils/preview-visited'
+import { GUEST_LANDING_URL, SESSION_EXPIRED_TOAST } from '../guest/guide'
+import { useChildStore } from './child'
+import { useFamilyStore } from './family'
 import { useOutboxStore } from './outbox'
 
 const REFRESH_TOKEN_KEY = 'refreshToken'
@@ -25,6 +27,12 @@ export const useAuthStore = defineStore('auth', {
     token: null as string | null,
     mustChangePassword: false,
     status: 'idle' as 'idle' | 'loading' | 'error',
+    /**
+     * 会话问过而没有答案，和问过之后答案是"没有"，是两件事。
+     * `token` 是内存态，冷启动第一帧必然是 null；这时把人叫做游客，
+     * 老用户每次打开应用都会先被问一遍"要不要登录"。
+     */
+    sessionResolved: false,
     error: null as string | null,
     /** 最近一次失败的 HTTP 状态码（网络失败是 0）。"账号已存在"这种要据此决定下一步，光看文案太脆。 */
     errorStatus: 0,
@@ -32,6 +40,13 @@ export const useAuthStore = defineStore('auth', {
 
   getters: {
     isLoggedIn: (s) => s.token !== null,
+    /**
+     * 这一页该按哪种身份排版：还没问出来 / 确认是游客 / 确认有会话。
+     * 游客判定只认这一处，四个 Tab 页各自 `!isLoggedIn` 会问出四种答案。
+     */
+    session: (s): 'unknown' | 'guest' | 'member' =>
+      s.token !== null ? 'member' : s.sessionResolved ? 'guest' : 'unknown',
+    isGuest: (s) => s.token === null && s.sessionResolved,
   },
 
   actions: {
@@ -110,7 +125,7 @@ export const useAuthStore = defineStore('auth', {
     },
 
     async logout(): Promise<void> {
-      // 主动退出：之后在飞的请求 401 是预期内的，不该被当成"会话过期"再弹一次欢迎页。
+      // 主动退出：之后在飞的请求 401 是预期内的，不该被当成"会话过期"再甩回首页弹一句。
       setSessionExpiredHandler(null)
       try {
         await authApi.logout()
@@ -143,7 +158,9 @@ export const useAuthStore = defineStore('auth', {
     async runBootstrap(): Promise<void> {
       const before = readRefreshToken()
       if (!before) {
+        // 本地压根没有凭证：这就是游客，问也不用问。
         this.status = 'idle'
+        this.sessionResolved = true
         return
       }
       this.status = 'loading'
@@ -156,9 +173,11 @@ export const useAuthStore = defineStore('auth', {
         // 强制改密标记必须由 /me 恢复：登录响应早就随刷新丢了。
         this.mustChangePassword = me.mustChangePassword
         this.status = 'idle'
+        this.sessionResolved = true
       } catch (err) {
         // 连不上服务器不等于凭证过期：清会话会把服务端还认的那张 refresh token 一起扔掉，
         // 家长断网重开一次应用就得重新登录。留着会话，让页面自己说"没读到"。
+        // 同理也别把人叫做游客——这一趟问不出真相，页面该说"没加载出来"而不是"来登录吧"。
         if (err instanceof ApiRequestError && err.isNetworkError) {
           this.fail(err)
           return
@@ -173,13 +192,11 @@ export const useAuthStore = defineStore('auth', {
     applySession(res: { accessToken: string; refreshToken: string; user: UserDto; mustChangePassword: boolean }) {
       setAccessToken(res.accessToken)
       uni.setStorageSync(REFRESH_TOKEN_KEY, res.refreshToken)
-      // 会话一建立，"看过预览"这个游客标记就该作废：不然注册过的人每次冷启动
-      // 都被欢迎页当成没注册完，按钮一直写着"继续注册"。
-      clearPreviewVisited()
       this.token = res.accessToken
       this.user = res.user
       this.mustChangePassword = res.mustChangePassword
       this.status = 'idle'
+      this.sessionResolved = true
       this.clearError()
       // 登录/注册是直接进 Tab 页的，不会再触发 App 的 onShow：角标不自己补这一下，
       // 这一整趟会话头顶都是空的。
@@ -197,18 +214,28 @@ export const useAuthStore = defineStore('auth', {
       // 轮询跟着停：继续跑是在替上一个账号读通知，而"哪些已经弹过"那份进度
       // 到了下一个账号身上，就会把人家真正该看到的提醒当成旧账吞掉。
       resetDueWatch()
+      // 家庭与孩子是"这个账号看过的东西"，而且选中项存在设备级 storage 里。
+      // 不清的话，退出后游客那一屏仍画着上一个账号的孩子名，点一下真会发出一条
+      // 不带凭证的请求；下一次冷启动建 store 又会把那个 familyId 从盘上捡回来。
+      useFamilyStore().reset()
+      useChildStore().reset()
       this.token = null
       this.user = null
       this.mustChangePassword = false
+      this.sessionResolved = true
     },
 
     /**
-     * 凭证救不回来了：与其让每个页面各自把 "Unauthorized" 印在界面上，
-     * 不如一次把会话清掉、带回欢迎页，并在那里说清楚为什么。
+     * 凭证救不回来了：清掉会话，把人放回首页的游客态，并在那里说一句为什么。
+     *
+     * 不再送去登录页——正在看的东西被打断，而游客态本来就有"重新登录"这颗按钮。
+     * 用 reLaunch 而不是 switchTab：人可能停在任何一个页面上，而那些页面的骨架里
+     * 还挂着上一个家庭的数据。
      */
     handleSessionExpired() {
       this.clearSession()
-      uni.reLaunch({ url: '/pages/welcome/index?expired=1' })
+      uni.reLaunch({ url: GUEST_LANDING_URL })
+      uni.showToast({ title: SESSION_EXPIRED_TOAST, icon: 'none' })
     },
 
     clearError() {

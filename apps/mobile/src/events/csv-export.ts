@@ -14,12 +14,20 @@ const pad = (n: number) => String(n).padStart(2, '0')
 const HEADERS = ['时间', '孩子', '类型', '详情', '记录人', '备注'] as const
 
 /**
+ * 备注与详情是自由文本。家长在里面写个 `=1+1` 只是随手，Excel 却会真的执行它
+ * （CSV 注入：`=cmd|'/C calc'!A0` 是能打开计算器的那一类）。以这些字符开头的
+ * 格子前置一个单引号落成文本——多看得见的一个 '，换表格不会自己跑东西。
+ */
+const FORMULA_LEAD = /^[=+\-@\t\r]/
+
+/**
  * RFC 4180 转义：只要字段里有逗号、双引号、或换行，就整字段裹双引号，
  * 内部的双引号翻倍。备注是自由文本，这三样都可能碰上。
  */
 function escapeCell(value: string): string {
-  if (/[",\r\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`
-  return value
+  const text = FORMULA_LEAD.test(value) ? `'${value}` : value
+  if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`
+  return text
 }
 
 function rowOf(event: EventDto, childName: string, timezone: string): string {

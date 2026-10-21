@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { PASSWORD_MIN_LENGTH } from '@moonbud/shared'
 import { onLoad } from '@dcloudio/uni-app'
+import { blockGuestDeepLink } from '../../guest/deep-link'
 import { computed, ref } from 'vue'
 import PasswordField from '../../components/PasswordField.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useAuthStore } from '../../stores/auth'
+import { stepBack } from '../../utils/back-nav'
 
 const authStore = useAuthStore()
 
@@ -18,7 +20,8 @@ const loading = computed(() => authStore.status === 'loading')
 
 const toast = (title: string) => uni.showToast({ title, icon: 'none' })
 
-onLoad((query) => {
+onLoad(async (query) => {
+  if (await blockGuestDeepLink()) return
   forced.value = String(query?.forced ?? '') === '1'
 })
 
@@ -44,7 +47,7 @@ async function onSubmit() {
   }
   toast('密码已修改')
   if (forced.value) uni.switchTab({ url: '/pages/home/index' })
-  else uni.navigateBack()
+  else stepBack()
 }
 </script>
 

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { computed, ref } from 'vue'
+import { confirmLoginGate, LOGIN_ENTRY_URL, needsLogin, TEACH_PATH } from '../../guest/gate'
+import { GUEST_LANDING_URL } from '../../guest/guide'
 import { fetchUnreadCount } from '../../notifications/unread'
 import { applyUnreadBadge } from '../../notifications/tab-badge'
 import ThemeRoot from '../../components/ThemeRoot.vue'
@@ -9,11 +11,14 @@ import { useAuthStore } from '../../stores/auth'
 import { useDupWindowStore } from '../../stores/dup-window'
 import { useFamilyStore } from '../../stores/family'
 import { confirmDanger } from '../../utils/confirm'
+import { guardForcedChange } from '../../utils/forced-change'
 import { pickerOptions, timezoneLabel, type TimezoneOption } from '../../utils/timezone-options'
 
 const authStore = useAuthStore()
 const familyStore = useFamilyStore()
 const dup = useDupWindowStore()
+
+const isGuest = computed(() => authStore.isGuest)
 
 const unread = ref<number | null>(null)
 
@@ -24,7 +29,22 @@ const unreadLabel = computed(() => {
 })
 
 const user = computed(() => authStore.user)
-const familyName = computed(() => familyStore.currentFamily?.name ?? '还没有家庭')
+
+/** 会话还没问出来的那一小段，这一屏什么都不说；游客这里也没有"家"可念，空着比"还没有家庭"诚实。 */
+const familyName = computed(() => {
+  if (authStore.session !== 'member') return ''
+  return familyStore.currentFamily?.name ?? '还没有家庭'
+})
+
+const accountName = computed(() => {
+  if (user.value) return user.value.nickname
+  return authStore.session === 'unknown' ? '' : '未登录'
+})
+
+const accountInitial = computed(() => {
+  if (user.value) return user.value.nickname.slice(0, 1)
+  return authStore.session === 'unknown' ? '' : '游'
+})
 
 /** 只有一个家庭时，"切换家庭"是个假入口，别摆出来。 */
 const canSwitchFamily = computed(() => familyStore.families.length > 1)
@@ -40,7 +60,10 @@ const timezoneIndex = computed(() => {
   const at = timezoneOptions.value.findIndex((o) => o.zone === user.value?.timezone)
   return at < 0 ? 0 : at
 })
-const timezoneText = computed(() => (user.value ? timezoneLabel(user.value.timezone) : '未设置'))
+const timezoneText = computed(() => {
+  if (isGuest.value) return ''
+  return user.value ? timezoneLabel(user.value.timezone) : '未设置'
+})
 
 const savingTimezone = ref(false)
 
@@ -55,8 +78,9 @@ async function onTimezoneChange(e: { detail: { value: string | number } }): Prom
 
 async function refreshUnread(): Promise<void> {
   // 冷启动时 access token 还在路上（isLoggedIn 只是内存态）。不等会话落定就
-  // 走下面的守卫，这一页会把家庭名一直说成"还没有家庭"，说到你离开本页。
-  if (authStore.status === 'loading') await authStore.bootstrap()
+  // 走下面的守卫，这一页会把该念的空着，空到你离开本页。
+  if (authStore.session === 'unknown') await authStore.bootstrap()
+  // 游客没有未读，也没有家庭：这两次请求都不发，别让它们回一个 401 再被当成会话过期。
   if (!authStore.isLoggedIn) return
   // 一次读取喂两处：这一行的数字和 tabBar 角标各问一次会拿到两个"未读数"。
   const count = await fetchUnreadCount()
@@ -74,15 +98,32 @@ async function logout(): Promise<void> {
   })
   if (!ok) return
   await authStore.logout()
-  uni.reLaunch({ url: '/pages/welcome/index' })
+  // 退出之后人还在应用里，只是回到游客态：欢迎页已经没有了，首页会说清楚为什么是空的。
+  uni.reLaunch({ url: GUEST_LANDING_URL })
 }
 
-/** 必须是"点了就跳"的那一种：`@click="go('/x')"` 拿到的是表达式的返回值，柯里工厂造出来的函数没人去调。 */
-const go = (path: string) => {
-  uni.navigateTo({ url: path })
+/**
+ * 游客点这一页的行：要账号的那一行先问一句，愿意才去登录页。
+ * 行本身一律留着——藏起来等于让游客以为这个应用没有这个功能。
+ * 注意写法必须是"点了就跳"的那一种：`@click="open('/x')"` 拿到的是表达式的返回值，柯里工厂造出来的函数没人去调。
+ */
+async function open(entry: string): Promise<void> {
+  if (needsLogin(entry, isGuest.value)) {
+    await confirmLoginGate(entry)
+    return
+  }
+  uni.navigateTo({ url: entry })
 }
 
-onShow(() => void refreshUnread())
+/** 游客点这一颗不需要先问"需要登录吗"——他点的就是登录。 */
+function goLogin(): void {
+  uni.navigateTo({ url: LOGIN_ENTRY_URL })
+}
+
+onShow(() => {
+  guardForcedChange(authStore.mustChangePassword)
+  void refreshUnread()
+})
 onPullDownRefresh(() => {
   void refreshUnread().finally(() => uni.stopPullDownRefresh())
 })
@@ -93,12 +134,20 @@ onPullDownRefresh(() => {
     <view class="page">
       <view class="account">
         <view class="account__avatar">
-          <text class="account__initial">{{ (user?.nickname ?? '?').slice(0, 1) }}</text>
+          <text class="account__initial">{{ accountInitial }}</text>
         </view>
         <view class="account__main">
-          <text class="account__name">{{ user?.nickname ?? '未登录' }}</text>
+          <text class="account__name">{{ accountName }}</text>
           <text class="account__meta">{{ user ? `@${user.username}` : '' }}</text>
           <text class="account__meta">{{ familyName }}</text>
+        </view>
+      </view>
+
+      <view class="section">
+        <text class="section__title">先看看</text>
+        <view class="row" @click="open(TEACH_PATH)">
+          <text class="row__label">功能教学</text>
+          <text class="row__chevron">›</text>
         </view>
       </view>
 
@@ -107,7 +156,7 @@ onPullDownRefresh(() => {
         <view class="card">
           <theme-switcher />
         </view>
-        <view class="row" @click="go('/pages/theme-settings/index')">
+        <view class="row" @click="open('/pages/theme-settings/index')">
           <text class="row__label">主题设置</text>
           <text class="row__chevron">›</text>
         </view>
@@ -115,14 +164,14 @@ onPullDownRefresh(() => {
 
       <view class="section">
         <text class="section__title">提醒</text>
-        <view class="row" @click="go('/pages/dup-window-settings/index')">
+        <view class="row" @click="open('/pages/dup-window-settings/index')">
           <text class="row__label">重复提醒提示</text>
           <view class="row__left">
             <text class="row__value">{{ dupLabel }}</text>
             <text class="row__chevron">›</text>
           </view>
         </view>
-        <view class="row" @click="go('/pages/notification-center/index')">
+        <view class="row" @click="open('/pages/notification-center/index')">
           <view class="row__left">
             <text class="row__label">提醒中心</text>
             <text v-if="unreadLabel" class="badge"><text class="badge__label">{{ unreadLabel }}</text></text>
@@ -133,19 +182,19 @@ onPullDownRefresh(() => {
 
       <view class="section">
         <text class="section__title">家庭</text>
-        <view class="row" @click="go('/pages/family-settings/index')">
+        <view class="row" @click="open('/pages/family-settings/index')">
           <text class="row__label">家庭设置</text>
           <text class="row__chevron">›</text>
         </view>
-        <view class="row" @click="go('/pages/member-list/index')">
+        <view class="row" @click="open('/pages/member-list/index')">
           <text class="row__label">成员管理</text>
           <text class="row__chevron">›</text>
         </view>
-        <view class="row" @click="go('/pages/invite-qrcode/index')">
+        <view class="row" @click="open('/pages/invite-qrcode/index')">
           <text class="row__label">邀请家人</text>
           <text class="row__chevron">›</text>
         </view>
-        <view v-if="canSwitchFamily" class="row" @click="go('/pages/family-select/index')">
+        <view v-if="canSwitchFamily" class="row" @click="open('/pages/family-select/index')">
           <view class="row__left">
             <text class="row__label">切换家庭</text>
             <text class="row__value">{{ familyName }}</text>
@@ -156,7 +205,8 @@ onPullDownRefresh(() => {
 
       <view class="section">
         <text class="section__title">账号</text>
-        <picker :range="timezoneOptions" range-key="name" :value="timezoneIndex" @change="onTimezoneChange">
+        <!-- 游客身上这一行不是选择器：滚轮里挑一个"上海"然后保存失败，比什么都不给更骗人。 -->
+        <picker v-if="!isGuest" :range="timezoneOptions" range-key="name" :value="timezoneIndex" @change="onTimezoneChange">
           <view class="row">
             <text class="row__label">时区</text>
             <view class="row__left">
@@ -165,8 +215,12 @@ onPullDownRefresh(() => {
             </view>
           </view>
         </picker>
+        <view v-else class="row" @click="open('时区')">
+          <text class="row__label">时区</text>
+          <text class="row__chevron">›</text>
+        </view>
         <text class="hint">改的是这些钟点读给谁看。已记下的时刻不变，已排好的提醒也在原来那一刻响——在新时区里看，它们会写成别的钟点。</text>
-        <view class="row" @click="go('/pages/change-password/index')">
+        <view class="row" @click="open('/pages/change-password/index')">
           <text class="row__label">修改密码</text>
           <text class="row__chevron">›</text>
         </view>
@@ -181,7 +235,9 @@ onPullDownRefresh(() => {
         </view>
       </view>
 
-      <view class="btn btn--ghost" @click="logout"><text class="btn__label">退出登录</text></view>
+      <!-- 游客没有可退出的东西；这一颗换成进登录页的入口，和上面那些行落到同一处。 -->
+      <view v-if="isGuest" class="btn" @click="goLogin"><text class="btn__label">登录 / 注册</text></view>
+      <view v-else class="btn btn--ghost" @click="logout"><text class="btn__label">退出登录</text></view>
     </view>
   </theme-root>
 </template>

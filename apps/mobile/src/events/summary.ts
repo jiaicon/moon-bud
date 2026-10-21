@@ -1,4 +1,5 @@
 import type { EventDto } from '@moonbud/shared'
+import { wallStamp } from '../utils/wall-time'
 
 export interface TodaySummary {
   lastFeeding: EventDto | null
@@ -44,6 +45,17 @@ export function dayKeyIn(timezone: string, instant: Date): string {
     // 落到下面的本地兜底
   }
   return `${instant.getFullYear()}-${pad(instant.getMonth() + 1)}-${pad(instant.getDate())}`
+}
+
+/**
+ * "某天 ± N 天"要按墙上日期算，不能给瞬间加 24 小时：夏令时切换那天有 23 或 25 个小时，
+ * 加减满一天会落回同一天（或跳过一天），"昨天/明天"于是被念成月日。
+ */
+export function adjacentDayKey(timezone: string, instant: Date, offsetDays: number): string {
+  const { year, month, day } = wallStamp(timezone, instant)
+  const shifted = new Date(Date.UTC(year, month - 1, day) + offsetDays * 86_400_000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`
 }
 
 function latestOf(events: EventDto[], type: EventDto['type']): EventDto | null {

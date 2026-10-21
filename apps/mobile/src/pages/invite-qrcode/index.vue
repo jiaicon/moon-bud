@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { onLoad } from '@dcloudio/uni-app'
+import { blockGuestDeepLink } from '../../guest/deep-link'
+import { inviteWindow } from '../../invite/invite-window'
 import QRCode from 'qrcode'
 import { computed, ref } from 'vue'
 import { invitesApi } from '../../api/endpoints'
@@ -77,11 +79,16 @@ async function loadInvites(): Promise<void> {
 
 async function create(): Promise<void> {
   if (!familyId.value || busy.value) return
+  const parsed = inviteWindow(hours.value)
+  if (!parsed.ok) {
+    error.value = parsed.error
+    return
+  }
   busy.value = true
   error.value = null
   try {
     // 邀请码可被反复试错，因此默认限制次数与时长，而不是发一张长期有效的通行证。
-    const invite = await invitesApi.create(familyId.value, role.value, Number(hours) || 72, 20)
+    const invite = await invitesApi.create(familyId.value, role.value, parsed.expiresInHours, 20)
     active.value = invite
     await loadInvites()
   } catch (err) {
@@ -122,6 +129,7 @@ function remaining(invite: InviteDto): string {
 }
 
 onLoad(async () => {
+  if (await blockGuestDeepLink()) return
   await familyStore.load()
   await loadInvites()
 })
@@ -176,7 +184,7 @@ onLoad(async () => {
           <template v-else>
             <view v-if="landingUrl" class="qr-fallback"><text class="qr-fallback__text">二维码生成失败，请用邀请码</text></view>
             <view v-else class="qr-fallback">
-              <text class="qr-fallback__text">扫码需要先在 .env 里配置 VITE_INVITE_BASE_URL；当前只能用上面的邀请码</text>
+              <text class="qr-fallback__text">这台手机上没有配置扫码地址，请让家人手动输入上面这串邀请码</text>
             </view>
           </template>
         </view>

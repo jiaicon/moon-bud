@@ -40,6 +40,16 @@ export const useChildStore = defineStore('child', {
       uni.setStorageSync(CURRENT_CHILD_KEYS, this.currentChildIdByFamily)
     },
 
+    /**
+     * 会话没了，"这一家有哪些孩子、选中了哪个"就不再属于任何人。盘上那份要一起放下：
+     * 游客页上的孩子胶囊就是从它读出来的，留着等于把上一个账号的孩子摆给人看。
+     */
+    reset(): void {
+      this.childrenByFamily = {}
+      this.currentChildIdByFamily = {}
+      uni.setStorageSync(CURRENT_CHILD_KEYS, {})
+    },
+
     async create(familyId: string, input: { name: string; gender: ChildDto['gender']; birthday: string }): Promise<ChildDto | null> {
       try {
         const child = await childrenApi.create(familyId, input)

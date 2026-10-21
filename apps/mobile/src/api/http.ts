@@ -131,11 +131,17 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       const retry = await send(fresh)
       if (retry.statusCode >= 200 && retry.statusCode < 300) return retry.data as T
       // 报"过期"的门槛是本地到底有没有会话：游客的一次 401 不是过期，
-      // 报了就等于把他甩进"欢迎页 → onShow → 又 401"的死圈。
+      // 报了就等于把他甩进"登录已过期 → 首页 → 又 401"的死圈。
       if (retry.statusCode === 401 && hadSession) reportSessionExpired()
       throw normalizeError(retry)
     } catch (err) {
-      if (err instanceof ApiRequestError) throw err
+      if (err instanceof ApiRequestError) {
+        // 续期自己被退回 401：refresh token 过期或被撤销，这正是"会话没了"。
+        // 不报就等于把人留在原地反复撞同一个 401——而首页游客态本来备好了重新登录。
+        // 网络错误（statusCode 0）不在此列：那是连不上，不是凭证失效，不能替他登出。
+        if (hadSession && err.statusCode === 401) reportSessionExpired()
+        throw err
+      }
       if (hadSession) reportSessionExpired()
       throw normalizeError(err)
     }

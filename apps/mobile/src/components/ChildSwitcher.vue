@@ -14,9 +14,17 @@ const children = computed(() => childStore.childrenByFamily[familyId.value] ?? [
 const current = computed(() => childStore.currentChild(familyId.value))
 // 名单还没读到过的时候不能写"未添加"：那是"这个家庭没有孩子"的意思。
 const loaded = computed(() => familyId.value in childStore.childrenByFamily)
-const display = computed(
-  () => current.value?.name ?? (familyId.value && !loaded.value ? '读取中' : '未添加'),
-)
+/**
+ * 四种状态要说得开：有选中的孩子→名字；还没读到→"读取中"；
+ * 读砸了→"没读到"（停在"读取中"是谎报还在转，人只会一直等）。
+ * 添加/修改孩子失败也会留下 error，所以只在名单没读出来时才拿它说话。
+ */
+const display = computed(() => {
+  if (current.value) return current.value.name
+  if (!familyId.value) return '未添加'
+  if (loaded.value) return '未添加'
+  return childStore.error ? '没读到' : '读取中'
+})
 
 function pick(childId: string): void {
   open.value = false

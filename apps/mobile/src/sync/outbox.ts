@@ -31,15 +31,23 @@ export const MAX_ATTEMPTS = 8
 /** 排了七天还没同步上去的东西，大概率是当时就没登录/家庭没了，继续留着只会被遗忘得越来越远。 */
 export const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
-export type ReplayStep = 'halt-offline' | 'retry-later' | 'drop'
+export type ReplayStep = 'halt-offline' | 'await-session' | 'retry-later' | 'drop'
 
 /**
  * 一次重发**失败**后该怎么走（成功由调用方直接出队，不进这里）。
  * - 网络层没通：说明还离线，后面每一条多半也会同样失败，整趟停下；这条不吃重试额度。
- * - 确定性错误：试够次数或放够时间就丢，否则留着，稍后再来一趟。
+ * - 401：坏的是这台手机的会话，不是这条记录。人重新登录之后它照样能上去，
+ *   所以既停下（后面的条会撞同一堵墙），也一次额度都不吃——否则八次回前台就把
+ *   一个从头到尾没登录成过的人记下的东西全丢了，而他只会以为"我记过，怎么没了"。
+ * - 其它确定性错误：试够次数或放够时间就丢，否则留着，稍后再来一趟。
  */
-export function stepFor(item: OutboxItem, failure: { isNetworkError: boolean }, now: number): ReplayStep {
+export function stepFor(
+  item: OutboxItem,
+  failure: { isNetworkError: boolean; statusCode?: number },
+  now: number,
+): ReplayStep {
   if (failure.isNetworkError) return 'halt-offline'
+  if (failure.statusCode === 401) return 'await-session'
   const usedAfterThis = item.attempts + 1
   if (usedAfterThis >= MAX_ATTEMPTS || now - item.enqueuedAt >= MAX_AGE_MS) return 'drop'
   return 'retry-later'

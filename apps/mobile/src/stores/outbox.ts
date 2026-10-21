@@ -45,6 +45,7 @@ export const useOutboxStore = defineStore('outbox', {
     items: [] as OutboxItem[],
     flushing: false,
     loaded: false,
+    persistFailed: false,
   }),
 
   getters: {
@@ -62,7 +63,16 @@ export const useOutboxStore = defineStore('outbox', {
     },
 
     persist(): void {
-      uni.setStorageSync(OUTBOX_KEY, this.items)
+      // 落盘会失败（配额满、隐私模式、原生存储写不动），而"记一笔"点下去不能是一片死寂：
+      // 队列留在内存里，这一次会话照样能重放；只是关掉应用就没了，得说一声。
+      // 只说一次：写不进去是这台手机此刻的状态，每条都提醒等于刷屏。
+      try {
+        uni.setStorageSync(OUTBOX_KEY, this.items)
+      } catch {
+        if (this.persistFailed) return
+        this.persistFailed = true
+        uni.showToast({ title: '这台手机存不下待同步的记录，关掉应用会丢', icon: 'none' })
+      }
     },
 
     enqueue(op: OutboxOp, familyId: string, eventId: string, body?: Record<string, unknown>): void {
@@ -145,7 +155,14 @@ export const useOutboxStore = defineStore('outbox', {
             await this.replay(item)
             this.removeEntry(item.entryId)
           } catch (err) {
-            const step = stepFor(item, { isNetworkError: isNetworkError(err) }, Date.now())
+            const step = stepFor(
+              item,
+              {
+                isNetworkError: isNetworkError(err),
+                statusCode: err instanceof ApiRequestError ? err.statusCode : undefined,
+              },
+              Date.now(),
+            )
             if (step === 'drop') {
               this.removeEntry(item.entryId)
               uni.showToast({ title: '有一条记录一直没同步上，已放弃', icon: 'none' })
@@ -158,7 +175,8 @@ export const useOutboxStore = defineStore('outbox', {
                 this.persist()
               }
             }
-            // halt-offline 与 retry-later 都停在这：后面的不再往下推。
+            // halt-offline、await-session 与 retry-later 都停在这：后面的不再往下推。
+            // 其中 await-session 一下都不吃额度——重新登录后这一趟会重来。
             break
           }
         }

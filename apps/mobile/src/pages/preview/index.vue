@@ -6,18 +6,14 @@ import ThemeSwitcher from '../../components/ThemeSwitcher.vue'
 import { EVENT_TYPE_META } from '../../events/event-fields'
 import { formatEventLine } from '../../events/format-event'
 import { PREVIEW_SCREENS, MOCK_CHILD, MOCK_EVENTS, MOCK_FAMILY, MOCK_REMINDERS } from '../../preview/mock-data'
-import { markPreviewVisited } from '../../utils/preview-visited'
-
-markPreviewVisited()
+import { wallStamp } from '../../utils/wall-time'
 
 // 游客预览用的是 mock 家庭，它没有账号时区可查，就按样例数据写死的那一个念。
 const PREVIEW_TIMEZONE = 'Asia/Shanghai'
 
-const clock = (iso: string): string => {
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
+// 念法必须走账号时区那套换算：直接读设备本地的钟点，手机不在东八区的游客
+// 会看到"上次喂奶 00:30"，以为演示坏了。
+const clock = (iso: string): string => wallStamp(PREVIEW_TIMEZONE, new Date(iso)).clock
 
 const latest = (type: string) =>
   MOCK_EVENTS.filter((e) => e.type === type).sort(

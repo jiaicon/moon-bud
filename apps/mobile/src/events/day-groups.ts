@@ -1,4 +1,4 @@
-import { dayKeyIn } from './summary'
+import { adjacentDayKey, dayKeyIn } from './summary'
 
 export interface DayGroup<T> {
   key: string
@@ -13,7 +13,7 @@ export interface DayGroup<T> {
  */
 export function groupByDay<T extends { occurredAt: string }>(events: T[], timezone: string, now: Date = new Date()): DayGroup<T>[] {
   const todayKey = dayKeyIn(timezone, now)
-  const yesterdayKey = dayKeyIn(timezone, new Date(now.getTime() - 86_400_000))
+  const yesterdayKey = adjacentDayKey(timezone, now, -1)
   const out: DayGroup<T>[] = []
   for (const event of events) {
     const at = Date.parse(event.occurredAt)

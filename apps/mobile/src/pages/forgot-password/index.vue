@@ -3,12 +3,13 @@ import { ref } from 'vue'
 import { normalizeUsername } from '@moonbud/shared'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { authApi } from '../../api/endpoints'
+import { stepBack } from '../../utils/back-nav'
 
 const username = ref('')
 const submitting = ref(false)
 
 const toast = (title: string) => uni.showToast({ title, icon: 'none' })
-const goBack = () => uni.navigateBack()
+const goBack = () => stepBack()
 
 async function onSubmit() {
   if (submitting.value) return
@@ -28,7 +29,7 @@ async function onSubmit() {
   submitting.value = false
   // 固定文案：不区分账号是否存在，否则这一页就成了账号探测接口。
   toast('已提交，家庭里的管理员会帮你重置')
-  uni.navigateBack()
+  stepBack()
 }
 </script>
 

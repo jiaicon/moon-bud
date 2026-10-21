@@ -5,6 +5,7 @@ import { computed, getCurrentInstance, nextTick, ref, watch, type Ref } from 'vu
 import { eventsApi, membersApi } from '../../api/endpoints'
 import { canModifyEvent, stageForEdit } from '../../events/event-edit'
 import { centerScrollLeft } from '../../events/chip-scroll'
+import { confirmLoginGate } from '../../guest/gate'
 import { EVENT_TYPE_META } from '../../events/event-fields'
 import { groupByDay } from '../../events/day-groups'
 import { buildEventQuery, emptyListCopy, rangeBounds, RANGE_OPTIONS, recorderOptions, type EventRange } from '../../events/list-filters'
@@ -13,7 +14,9 @@ import { applyPendingUpdates, filterRows, pendingCreateRows, pendingDeletedIds }
 import { refreshUnreadTabBadge } from '../../notifications/tab-badge'
 import { formatEventLine } from '../../events/format-event'
 import { confirmDanger } from '../../utils/confirm'
+import { guardForcedChange } from '../../utils/forced-change'
 import EmptyState from '../../components/EmptyState.vue'
+import GuestGuide from '../../components/GuestGuide.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useChildStore } from '../../stores/child'
@@ -26,6 +29,8 @@ const authStore = useAuthStore()
 const familyStore = useFamilyStore()
 const childStore = useChildStore()
 const outboxStore = useOutboxStore()
+
+const isGuest = computed(() => authStore.isGuest)
 
 const events = ref<EventDto[]>([])
 const total = ref(0)
@@ -162,7 +167,14 @@ async function loadMembers(): Promise<void> {
 // 用 ready 而不是"列表非空"来判定：第一条记录保存回来时列表正是空的。
 let ready = false
 
-onLoad(async () => {
+/** 进入这一屏：会话没落定之前什么都不读，游客这一屏一条请求都不发。 */
+async function enter(): Promise<void> {
+  // isLoggedIn 是内存态，冷启动第一帧必然是 null；不等它就判游客，
+  // 老用户打开应用会先看一眼"来登录吧"。
+  if (authStore.session === 'unknown') await authStore.bootstrap()
+  // 游客，以及"问过但问不出来"的那一趟：一条请求都不发。发出去的 401 会被
+  // 当成会话过期再弹一遍提示，而这一屏本来就没东西要保护。
+  if (!authStore.isLoggedIn) return
   outboxStore.load()
   await familyStore.load()
   if (familyId.value) {
@@ -170,12 +182,21 @@ onLoad(async () => {
   }
   await load(true)
   ready = true
-})
+}
+
+onLoad(() => void enter())
 
 // 从表单返回时必须看到新记录，比"表单在返回前刷新列表"更可靠：
 // 任何回到本页的路径都会触发，不只是保存成功那一条。
 onShow(() => {
+  // 拿着临时密码的人不该能在记录页里往下翻（四页各拦，判据是改密页在不在栈顶）。
+  guardForcedChange(authStore.mustChangePassword)
+  // 游客这一屏不画角标：那是上一个账号留下的未读数，留着不放等于替他保管。
+  if (!authStore.isLoggedIn) return
+  // 从没跑成过首屏那次取数（例如刚在本页登录完）就补一次 enter：这一份实例不会被
+  // 重建，不补就停在"还没有家庭"上，而这个人其实早就有。
   if (ready) void load(true)
+  else void enter()
   // tabBar 这时才挂载好，冷启动的 App.onShow 里画角标会落空，得在落地页补。
   void refreshUnreadTabBadge()
 })
@@ -198,7 +219,18 @@ onReachBottom(() => {
   if (hasMore.value && !loading.value) void load(false)
 })
 
+/**
+ * 游客看得到整副筛选栏，点其中任何一处只问一句。判断集中在这里，
+ * 不散进模板：加一格筛项就有人忘记问。
+ */
+function gate(key: string): boolean {
+  if (!authStore.isGuest) return false
+  void confirmLoginGate(key)
+  return true
+}
+
 function pickType(next: EventType | '') {
+  if (gate('筛选')) return
   if (typeFilter.value === next) return
   typeFilter.value = next
   void load(true)
@@ -211,15 +243,23 @@ function pickChild(next: string) {
 }
 
 function pickRecorder(next: string) {
+  if (gate('筛选')) return
   if (recorderFilter.value === next) return
   recorderFilter.value = next
   void load(true)
 }
 
 function pickRange(next: EventRange) {
+  if (gate('筛选')) return
   if (rangeFilter.value === next) return
   rangeFilter.value = next
   void load(true)
+}
+
+/** 展开抽屉也是筛选的一部分：游客点开它同样只问一句。 */
+function openTypeSheet() {
+  if (gate('筛选')) return
+  typeSheetOpen.value = true
 }
 
 const exporting = ref(false)
@@ -253,19 +293,36 @@ async function fetchAllMatching(): Promise<EventDto[]> {
   return collected
 }
 
+/**
+ * 导出的必须就是屏幕上那一份：本机还没传上去的新增要在表里、删掉的不能还在、
+ * 改过的要念改后的值。屏幕用 timelineEvents（已加载的那几页），导出把同一组
+ * 投影套在"翻到底"的完整结果上——两边只差在页数，不差在身份。
+ */
+function exportRows(serverEvents: EventDto[]): EventDto[] {
+  const kept = applyPendingUpdates(
+    serverEvents.filter((e) => !pendingDeleted.value.has(e.id)),
+    outboxStore.items,
+    familyId.value,
+  )
+  return [...pendingRows.value, ...kept].sort(
+    (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime(),
+  )
+}
+
 async function exportCurrent(): Promise<void> {
+  if (gate('导出 CSV')) return
   if (!familyId.value || exporting.value) return
   exporting.value = true
   uni.showLoading({ title: '正在导出…' })
   try {
-    const events = await fetchAllMatching()
+    const rows = exportRows(await fetchAllMatching())
     const name = csvFileName(
       rangeFilter.value ? RANGE_OPTIONS.find((o) => o.value === rangeFilter.value)?.label ?? '' : '',
       new Date(),
       timezone.value,
     )
-    saveCsv(name, exportCsv(events, children.value, timezone.value))
-    uni.showToast({ title: `已导出 ${events.length} 条`, icon: 'none' })
+    saveCsv(name, exportCsv(rows, children.value, timezone.value))
+    uni.showToast({ title: `已导出 ${rows.length} 条`, icon: 'none' })
   } catch (err) {
     uni.showToast({ title: err instanceof Error ? err.message : '导出失败', icon: 'none' })
   } finally {
@@ -403,8 +460,20 @@ async function removeEvent(event: EventDto): Promise<void> {
 <template>
   <theme-root>
     <view class="timeline">
+      <!-- 会话还没问出来的那一瞬，无论是"来登录吧"还是"去创建家庭"，两句都是谎话。 -->
       <empty-state
-        v-if="!familyId"
+        v-if="authStore.session === 'unknown'"
+        icon="🌙"
+        title="正在确认登录状态"
+        hint="稍一下下，这一家的记录马上就来。"
+      />
+
+      <!--
+        游客这一屏画同一副筛选栏（它就是这一页的主要功能），列表区换成引导。
+        所以那三句家庭话只对会员说：游客没有家庭是意料之中，不是要他去建一个。
+      -->
+      <empty-state
+        v-else-if="!isGuest && !familyId"
         icon="🏠"
         title="还没有家庭"
         hint="创建一个家庭，全家才能共用同一份记录。"
@@ -413,7 +482,7 @@ async function removeEvent(event: EventDto): Promise<void> {
       />
 
       <empty-state
-        v-else-if="!childrenLoaded"
+        v-else-if="!isGuest && !childrenLoaded"
         icon="👶"
         :title="childrenLoadFailed ? '孩子名单没加载出来' : '正在读取孩子名单'"
         :hint="childrenLoadFailed ? (childStore.error ?? '网络或后端暂时不可用，重试一下即可。') : '记录要按孩子来看，稍一下下。'"
@@ -422,7 +491,7 @@ async function removeEvent(event: EventDto): Promise<void> {
       />
 
       <empty-state
-        v-else-if="!childId"
+        v-else-if="!isGuest && !childId"
         icon="👶"
         title="这个家庭还没有孩子"
         hint="记录要有归属的孩子才记得下。"
@@ -431,6 +500,7 @@ async function removeEvent(event: EventDto): Promise<void> {
       />
 
       <template v-else>
+        <!-- 会员与游客共用这一份筛选栏：复制两遍就会有一份跟着不上改动。 -->
         <view class="timeline__filters">
           <view class="filter-bar">
             <scroll-view
@@ -455,7 +525,7 @@ async function removeEvent(event: EventDto): Promise<void> {
             </scroll-view>
 
             <!-- 横滑看不见的类型在这里全给出来，按钮本身不跟着滚。 -->
-            <view class="expand" @click="typeSheetOpen = true">
+            <view class="expand" @click="openTypeSheet">
               <text class="expand__glyph">☰</text>
             </view>
           </view>
@@ -523,9 +593,10 @@ async function removeEvent(event: EventDto): Promise<void> {
           </scroll-view>
         </view>
 
-        <!-- 待同步横幅：有几条压在本机等上传，就把它摆在列表最上面，并给一条手动催的出口。 -->
+        <!-- 待同步横幅：有几条压在本机等上传，就把它摆在列表最上面，并给一条手动催的出口。
+             游客不画：那一队是上一个账号留在这台手机上的。 -->
         <view
-          v-if="outboxStore.pendingCount"
+          v-if="!isGuest && outboxStore.pendingCount"
           class="pending"
           :class="{ 'pending--busy': outboxStore.flushing }"
           @click="retrySync"
@@ -553,8 +624,11 @@ async function removeEvent(event: EventDto): Promise<void> {
 
         <view v-if="groups.length" class="bottom-spacer" />
 
+        <!-- 空白区：游客看到的是"来登录吧"，会员看到的是"这个筛法没东西"。 -->
+        <guest-guide v-if="isGuest" page="events" />
+
         <empty-state
-          v-if="!loading && !groups.length && !error"
+          v-else-if="!loading && !groups.length && !error"
           icon="🌱"
           :title="emptyCopy.title"
           :hint="emptyCopy.hint"
@@ -562,7 +636,7 @@ async function removeEvent(event: EventDto): Promise<void> {
         <text v-if="loading" class="timeline__loading">加载中…</text>
       </template>
 
-      <view v-if="childId" class="fab" @click="goForm"><text class="fab__label">＋</text></view>
+      <view v-if="childId && !isGuest" class="fab" @click="goForm"><text class="fab__label">＋</text></view>
 
       <u-popup
         v-model="typeSheetOpen"

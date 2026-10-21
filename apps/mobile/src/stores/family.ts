@@ -61,6 +61,15 @@ export const useFamilyStore = defineStore('family', {
       uni.setStorageSync(CURRENT_FAMILY_KEY, familyId ?? '')
     },
 
+    /**
+     * 会话没了，"看过哪几个家、正选中哪个"就不再属于任何人。盘上那份也要放下：
+     * 它是在下一次冷启动时直接建进 state 的，留着等于给游客发上一家的门牌。
+     */
+    reset(): void {
+      this.families = []
+      this.switchFamily(null)
+    },
+
     async leave(familyId: string): Promise<boolean> {
       try {
         await familiesApi.leave(familyId)

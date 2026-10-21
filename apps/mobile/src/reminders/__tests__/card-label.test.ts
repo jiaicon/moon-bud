@@ -29,6 +29,22 @@ describe('reminderCardLabel', () => {
     expect(reminderCardLabel(base({}), at)).toBe('每天 · 下次 今天 20:00')
   })
 
+  it('每两天的"下次"落在创建时刻对齐的网格上，不会跟着查询日往后跑', () => {
+    // 10-19 10:00（上海）创建的"每隔两天 08:00"：创建时当天 08:00 已过，网格因此是 21、23、25……
+    const source = {
+      rrule: 'FREQ=DAILY;INTERVAL=2;BYHOUR=8;BYMINUTE=00',
+      createdAt: '2026-10-19T02:00:00.000Z',
+    }
+    // 20 号问：下一次是 21 号，不是"往后推两天"的 22 号。
+    expect(reminderCardLabel(base(source), new Date('2026-10-20T09:00:00.000Z'))).toBe(
+      '每 2 天 · 下次 明天 08:00',
+    )
+    // 21 号 09:00（那次刚过完）再问：23 号，而不是 22 号。
+    expect(reminderCardLabel(base(source), new Date('2026-10-21T01:00:00.000Z'))).toBe(
+      '每 2 天 · 下次 10月23日 08:00',
+    )
+  })
+
   it('过期了就说还欠哪一次，不许只报下一次', () => {
     // 上海 09:00：每天 08:00 那次已经过去。光写"下次 明天 08:00"，
     // 家长扫一眼就过去了，那一次谁都没做。

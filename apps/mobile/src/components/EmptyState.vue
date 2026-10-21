@@ -21,6 +21,8 @@ const emit = defineEmits<{ action: [] }>()
       <view v-if="actionLabel" class="empty__btn" @click="emit('action')">
         <text class="empty__btn-label">{{ actionLabel }}</text>
       </view>
+      <!-- 主按钮之外还要一条不那么用力的路：游客看完这一屏想先了解，而不是先注册。 -->
+      <slot />
     </view>
   </view>
 </template>

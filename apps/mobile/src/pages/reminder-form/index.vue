@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import { blockGuestDeepLink } from '../../guest/deep-link'
 import { NOTE_MAX_LENGTH, type MemberDto } from '@moonbud/shared'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { membersApi, remindersApi } from '../../api/endpoints'
@@ -12,6 +13,7 @@ import { useChildStore } from '../../stores/child'
 import { useFamilyStore } from '../../stores/family'
 import { confirmDanger } from '../../utils/confirm'
 import { isoFromWallTime, wallFields } from '../../utils/wall-time'
+import { stepBack } from '../../utils/back-nav'
 
 const authStore = useAuthStore()
 const familyStore = useFamilyStore()
@@ -145,7 +147,7 @@ async function onSubmit(): Promise<void> {
     // 都要重新排上，而"这条还在不在待办里"只有服务端知道。
     await resyncActiveReminderSchedules()
     uni.showToast({ title: '已保存', icon: 'none' })
-    setTimeout(() => uni.navigateBack(), 600)
+    setTimeout(() => stepBack(), 600)
   } catch (err) {
     uni.showToast({ title: err instanceof Error ? err.message : '保存失败', icon: 'none' })
   } finally {
@@ -172,7 +174,7 @@ async function cancelReminder(): Promise<void> {
     // 撤销排期不依赖网络：已经说了"别再响了"，就不能因为重算拉不到列表而继续响。
     disarmReminder(reminderId.value)
     uni.showToast({ title: '已停掉提醒', icon: 'none' })
-    setTimeout(() => uni.navigateBack(), 600)
+    setTimeout(() => stepBack(), 600)
   } catch (err) {
     uni.showToast({ title: err instanceof Error ? err.message : '停掉失败', icon: 'none' })
   } finally {
@@ -181,6 +183,7 @@ async function cancelReminder(): Promise<void> {
 }
 
 onLoad(async (query) => {
+  if (await blockGuestDeepLink()) return
   // 时区是账号属性，而账号要等冷启动的静默登录才落到 store：直开深链接时先等它，
   // 否则预填按兜底时区算，用户看到一个和自己家无关的钟点。
   if (!authStore.user) await authStore.bootstrap()
@@ -194,6 +197,8 @@ onLoad(async (query) => {
     members.value = []
   }
   const id = String(query?.id ?? '')
+  // 导航栏是 pages.json 里写死的"提醒"，编辑时不改口会让人以为在新增一条。
+  uni.setNavigationBarTitle({ title: id ? '编辑提醒' : '新建提醒' })
   if (!id) return
   reminderId.value = id
   try {
@@ -224,7 +229,7 @@ onLoad(async (query) => {
   }
 })
 
-const goBack = () => uni.navigateBack()
+const goBack = () => stepBack()
 </script>
 
 <template>

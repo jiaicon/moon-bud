@@ -31,6 +31,15 @@ describe('按天分组', () => {
     expect(groups[0].label).toBe('10月1日')
   })
 
+  it('夏令时回拨多出来的那一小时，不该让"昨天"变成月日', () => {
+    // 纽约 2026-11-01 凌晨把钟往回拨一格，那天有 25 个小时。
+    // 给瞬间减 24 小时的写法在这一天会从 11-01 的深夜退回 11-01 的凌晨，
+    // 于是昨天算不出来，10 月 31 日那一排卡片被念成"10月31日"。
+    const now = new Date('2026-11-02T04:30:00.000Z') // 当地 11-01 23:30
+    const groups = groupByDay([ev('a', '2026-10-31T12:00:00.000Z')], 'America/New_York', now)
+    expect(groups[0].label).toBe('昨天')
+  })
+
   it('时间解析不出来时归到"未知时间"，不丢记录', () => {
     const groups = groupByDay([ev('a', 'not-a-date')], 'UTC', new Date('2026-10-18T02:00:00.000Z'))
     expect(groups[0]).toMatchObject({ key: 'unknown', label: '未知时间' })

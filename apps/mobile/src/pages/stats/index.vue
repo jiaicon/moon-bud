@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { EventDto } from '@moonbud/shared'
 import { onLoad, onShow } from '@dcloudio/uni-app'
+import { blockGuestDeepLink } from '../../guest/deep-link'
 import { computed, ref } from 'vue'
 import { eventsApi } from '../../api/endpoints'
 import { buildEventQuery, rangeBounds, type EventListFilters, type EventRange } from '../../events/list-filters'
@@ -24,6 +25,8 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 /** 最近一次成功读到数据的时刻（epoch ms）。失败时界面靠它说清"这些数是几点读到的"。 */
 const loadedAt = ref<number | null>(null)
+/** 眼前这份数据是为哪个孩子取的：中途切了孩子，标题和待同步行都得跟着数据走，不跟指针。 */
+const loadedChildId = ref('')
 
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
 const children = computed(() => childStore.childrenByFamily[familyId.value] ?? [])
@@ -72,6 +75,7 @@ async function runLoad(): Promise<void> {
   const scopeTimezone = timezone.value
   if (!scopeFamilyId || !scopeChildId) {
     events.value = []
+    loadedChildId.value = ''
     return
   }
   loading.value = true
@@ -90,6 +94,8 @@ async function runLoad(): Promise<void> {
     if (seq !== loadSeq) return
     // 翻页期间别人也可能在记：按 id 去重，免得同一条在两页里各出现一次被数两遍。
     events.value = uniqueById([...daily, ...growth])
+    // 标题与待同步行跟着这份数据走：中途切了孩子的话，此刻图上还是上一个的。
+    loadedChildId.value = scopeChildId
     loadedAt.value = Date.now()
   } catch (err) {
     if (seq !== loadSeq) return
@@ -101,6 +107,7 @@ async function runLoad(): Promise<void> {
 
 let ready = false
 onLoad(async () => {
+  if (await blockGuestDeepLink()) return
   // 出箱那份是本地存储，不先读回来这里永远看不到"待同步"，图就少算几条。
   outboxStore.load()
   await familyStore.load()
@@ -112,7 +119,13 @@ onShow(() => {
   if (ready) void runLoad()
 })
 
-const childName = computed(() => children.value.find((c) => c.id === childId.value)?.name ?? '这个孩子')
+/**
+ * 图说的是谁：优先说"这份数据是为谁取的"。
+ * 一次都没成功读到过时（例如全程离线首启）盘上没有旧数据可混，才退回当前选中——
+ * 那时那条待同步的记录正是这个孩子刚记下的，不显示它就等于把它藏了。
+ */
+const displayChildId = computed(() => loadedChildId.value || childId.value)
+const childName = computed(() => children.value.find((c) => c.id === displayChildId.value)?.name ?? '这个孩子')
 const readAt = computed(() => readAtLabel(timezone.value, loadedAt.value))
 
 const sessionMeta = computed(() => ({
@@ -139,7 +152,7 @@ const statsEvents = computed(() => {
   // 待同步行只按孩子筛：窗口与生长两套口径在同一份 events 上各算各的，
   // 这里再套时间窗就会把"全量生长"那条漏掉。
   const local = filterRows(pendingCreateRows(items, familyId.value, sessionMeta.value), {
-    childId: childId.value,
+    childId: displayChildId.value,
   })
   return uniqueById([...server, ...local])
 })

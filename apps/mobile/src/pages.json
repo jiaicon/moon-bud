@@ -1,16 +1,17 @@
 {
-	// pages数组中第一项表示应用启动页；游客态从这里进 welcome，而不是登录页。
+	// pages数组中第一项表示应用启动页：未登录的人也从这里进首页，看的是真页面。
 	"pages": [
 		{
-			"path": "pages/welcome/index",
+			"path": "pages/home/index",
 			"style": {
-				"navigationBarTitleText": "月芽"
+				"navigationBarTitleText": "首页",
+				"enablePullDownRefresh": true
 			}
 		},
 		{
 			"path": "pages/preview/index",
 			"style": {
-				"navigationBarTitleText": "功能预览"
+				"navigationBarTitleText": "功能教学"
 			}
 		},
 		{
@@ -48,13 +49,6 @@
 			"path": "pages/child-form/index",
 			"style": {
 				"navigationBarTitleText": "添加孩子"
-			}
-		},
-		{
-			"path": "pages/home/index",
-			"style": {
-				"navigationBarTitleText": "首页",
-				"enablePullDownRefresh": true
 			}
 		},
 		{

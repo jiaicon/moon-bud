@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { EventDto } from '@moonbud/shared'
-import { buildOverviewRows, decideHomeView } from '../home-view'
+import { buildGuestOverviewRows, buildOverviewRows, decideHomeView } from '../home-view'
 import type { TodaySummary } from '../../../events/summary'
 
 const summary: TodaySummary = {
@@ -11,9 +11,35 @@ const summary: TodaySummary = {
 }
 
 describe('首页视图判定', () => {
+  it('会话还没问出来 → 既不能说"还没有家庭"，也不能说"来登录吧"', () => {
+    // 冷启动第一帧 token 还在路上；这时判成游客，老用户每次打开都被问一遍要不要登录。
+    expect(
+      decideHomeView({ session: 'unknown', familyLoadFailed: false, familyId: '', hasChild: false, childrenLoaded: false, childrenLoadFailed: false }),
+    ).toBe('checking')
+  })
+
+  it('确认是游客 → 游客引导，排在家庭空态之前', () => {
+    // 游客身上 familyId 永远是空串，和"有账号但没建过家"长得一模一样；不分流就念错。
+    expect(
+      decideHomeView({ session: 'guest', familyLoadFailed: false, familyId: '', hasChild: false, childrenLoaded: false, childrenLoadFailed: false }),
+    ).toBe('guest')
+  })
+
+  it('游客的判定压过加载失败：断网冷启动不该在游客屏上挂一个"重试"', () => {
+    expect(
+      decideHomeView({ session: 'guest', familyLoadFailed: true, familyId: '', hasChild: false, childrenLoaded: false, childrenLoadFailed: false }),
+    ).toBe('guest')
+  })
+
+  it('有会话的人照旧走家庭/孩子那套判定', () => {
+    expect(
+      decideHomeView({ session: 'member', familyLoadFailed: true, familyId: '', hasChild: false, childrenLoaded: true, childrenLoadFailed: false }),
+    ).toBe('retry')
+  })
+
   it('家庭列表加载失败时，绝不能说"还没有家庭"', () => {
     expect(
-      decideHomeView({ familyLoadFailed: true, familyId: '', hasChild: false, childrenLoaded: true, childrenLoadFailed: false }),
+      decideHomeView({ session: 'member', familyLoadFailed: true, familyId: '', hasChild: false, childrenLoaded: true, childrenLoadFailed: false }),
     ).toBe('retry')
   })
 
@@ -21,32 +47,32 @@ describe('首页视图判定', () => {
     // 冷启动的那一瞬 childrenByFamily 里还没有这个家庭：把"还不知道"渲染成
     // "确实没有"，家长看到的是自己没给孩子建过档。
     expect(
-      decideHomeView({ familyLoadFailed: false, familyId: 'f1', hasChild: false, childrenLoaded: false, childrenLoadFailed: false }),
+      decideHomeView({ session: 'member', familyLoadFailed: false, familyId: 'f1', hasChild: false, childrenLoaded: false, childrenLoadFailed: false }),
     ).toBe('loading')
   })
 
   it('孩子名单读失败了，"正在读取"必须变成一条出路', () => {
     // 挂在"正在读取"上没有重试，冷启动断网时首页就再也出不来了。
     expect(
-      decideHomeView({ familyLoadFailed: false, familyId: 'f1', hasChild: false, childrenLoaded: false, childrenLoadFailed: true }),
+      decideHomeView({ session: 'member', familyLoadFailed: false, familyId: 'f1', hasChild: false, childrenLoaded: false, childrenLoadFailed: true }),
     ).toBe('child-retry')
   })
 
   it('真的没有家庭时才给创建/加入引导', () => {
     expect(
-      decideHomeView({ familyLoadFailed: false, familyId: '', hasChild: false, childrenLoaded: true, childrenLoadFailed: false }),
+      decideHomeView({ session: 'member', familyLoadFailed: false, familyId: '', hasChild: false, childrenLoaded: true, childrenLoadFailed: false }),
     ).toBe('create-family')
   })
 
   it('有家庭没孩子 → 添加孩子', () => {
     expect(
-      decideHomeView({ familyLoadFailed: false, familyId: 'f1', hasChild: false, childrenLoaded: true, childrenLoadFailed: false }),
+      decideHomeView({ session: 'member', familyLoadFailed: false, familyId: 'f1', hasChild: false, childrenLoaded: true, childrenLoadFailed: false }),
     ).toBe('add-child')
   })
 
   it('都有 → 正常概览', () => {
     expect(
-      decideHomeView({ familyLoadFailed: false, familyId: 'f1', hasChild: true, childrenLoaded: true, childrenLoadFailed: false }),
+      decideHomeView({ session: 'member', familyLoadFailed: false, familyId: 'f1', hasChild: true, childrenLoaded: true, childrenLoadFailed: false }),
     ).toBe('ready')
   })
 
@@ -81,5 +107,17 @@ describe('首页视图判定', () => {
     const now = new Date('2026-10-21T04:00:00.000Z')
     expect(buildOverviewRows(summary, false, 'Asia/Shanghai', now)[0].value).toBe('昨天 14:00')
     expect(buildOverviewRows(summary, false, 'America/Los_Angeles', now)[0].value).toBe('昨天 23:00')
+  })
+
+  /**
+   * 游客那一屏的概览行。这一格挡的是一句很顺手的谎话：游客没有 summary，
+   * 直接把 null 喂给 buildOverviewRows 会念出"今天还没有 / 0 次"——
+   * 那是"这个家今天没人喂过孩子"，而他根本没有这个家。
+   */
+  it('游客的概览行只有短横线，不说"今天还没有"', () => {
+    const rows = buildGuestOverviewRows()
+    expect(rows.map((r) => r.label)).toEqual(['最近喂奶', '最近睡眠', '今日换尿布'])
+    expect(rows.map((r) => r.value)).toEqual(['—', '—', '—'])
+    expect(rows.every((r) => !r.failed)).toBe(true)
   })
 })

@@ -25,6 +25,22 @@ describe('stepFor：一次重放失败后怎么办', () => {
     expect(stepFor(item(), { isNetworkError: true }, 2_000)).toBe('halt-offline')
   })
 
+  it('401 是这台手机的会话坏了：等重新登录，别把它算成这条记录失败过', () => {
+    const nearlyUsed = item({ attempts: MAX_ATTEMPTS - 1 })
+    expect(stepFor(nearlyUsed, { isNetworkError: false, statusCode: 401 }, 2_000)).toBe('await-session')
+    // 放到第七天也一样：凭证坏了跟这条记录新不新没关系，老化规则不该参与。
+    expect(stepFor(item({ enqueuedAt: 1 }), { isNetworkError: false, statusCode: 401 }, 1 + MAX_AGE_MS)).toBe(
+      'await-session',
+    )
+  })
+
+  it('400/403 是这条记录自己的事：照旧走次数与老化', () => {
+    expect(stepFor(item(), { isNetworkError: false, statusCode: 400 }, 2_000)).toBe('retry-later')
+    expect(stepFor(item({ attempts: MAX_ATTEMPTS - 1 }), { isNetworkError: false, statusCode: 403 }, 2_000)).toBe(
+      'drop',
+    )
+  })
+
   it('确定性的错误（离线也会照样失败），刚试过不久：留着，稍后再来一趟', () => {
     expect(stepFor(item(), { isNetworkError: false }, 2_000)).toBe('retry-later')
   })

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import { blockGuestDeepLink } from '../../guest/deep-link'
 import type { Gender } from '@moonbud/shared'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useAuthStore } from '../../stores/auth'
 import { useChildStore } from '../../stores/child'
 import { useFamilyStore } from '../../stores/family'
 import { wallFields } from '../../utils/wall-time'
+import { stepBack } from '../../utils/back-nav'
 
 const familyStore = useFamilyStore()
 const childStore = useChildStore()
@@ -64,17 +66,22 @@ async function onSubmit(): Promise<void> {
     return
   }
   uni.showToast({ title: editing.value ? '已更新' : '已添加', icon: 'none' })
-  setTimeout(() => uni.navigateBack(), 600)
+  setTimeout(() => stepBack(), 600)
 }
 
 onLoad(async (query) => {
+  if (await blockGuestDeepLink()) return
   await familyStore.load()
   if (familyId.value) await childStore.load(familyId.value)
   const id = String(query?.id ?? '')
-  if (!id || !familyId.value) return
-  const child = (childStore.childrenByFamily[familyId.value] ?? []).find((c) => c.id === id)
-  if (!child) return
   // 没有 GET /children/:id，回填数据来自 store 里那一页列表。
+  const child =
+    id && familyId.value
+      ? (childStore.childrenByFamily[familyId.value] ?? []).find((c) => c.id === id)
+      : undefined
+  // 导航栏是 pages.json 里写死的"添加孩子"，编辑时不改口等于说自己在新建。
+  uni.setNavigationBarTitle({ title: child ? '编辑孩子' : '添加孩子' })
+  if (!child) return
   childId.value = id
   name.value = child.name
   gender.value = child.gender

@@ -102,6 +102,31 @@ export function applyPendingUpdates(rows: EventDto[], items: OutboxItem[], famil
   })
 }
 
+/**
+ * 首页概览、记录页、统计必须数同一份数据：断网记下的一顿奶，记录页有它而首页
+ * 说"今天 0 次"，同一屏上的两个数就互相打脸。这里把出箱里的三件事一次做完——
+ * 藏掉待删的、把待编辑盖上去、再并上待创建的。
+ *
+ * 待创建的 id 与服务端行撞上时只算一次：那一趟 POST 可能其实已经写进库、只是
+ * 响应没回来，条目还没从箱里落下，这时候两边各一份就是重复计数。
+ */
+export function mergePendingRows(
+  server: EventDto[],
+  items: OutboxItem[],
+  familyId: string,
+  meta: SessionMeta,
+): EventDto[] {
+  const hidden = pendingDeletedIds(items, familyId)
+  const pending = pendingCreateRows(items, familyId, meta)
+  const pendingIds = new Set(pending.map((r) => r.id))
+  const kept = applyPendingUpdates(
+    server.filter((row) => !hidden.has(row.id)),
+    items,
+    familyId,
+  ).filter((row) => !pendingIds.has(row.id))
+  return [...pending, ...kept]
+}
+
 export interface RowFilters {
   type?: EventType | ''
   childId?: string

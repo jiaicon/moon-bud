@@ -76,8 +76,22 @@ describe('exportCsv：家庭记录导出成一份能用 Excel 打开的 CSV', ()
     expect(lastLine).toContain('"会叫""妈妈""了, 好开心')
   })
 
-  it('空记录也产出表头，不产出空串：打开就是一片空白会被当成坏了', () => {
-    expect(stripBom(exportCsv([], [], 'Asia/Shanghai'))).toBe('时间,孩子,类型,详情,记录人,备注\r\n')
+  /**
+   * 备注是自由文本，家长写 "=1+1" 只是随手，Excel 却会当公式执行。
+   * 以 = + - @ 开头的格子前置单引号落成文本（OWASP 对 CSV 注入的常规处置）。
+   */
+  it('公式样子的备注不会被 Excel 执行：前置单引号落成文本', () => {
+    const csv = stripBom(
+      exportCsv(
+        [event({ type: 'diaper', occurredAt: '2026-10-19T01:30:00.000Z', note: '=1+1,2' })],
+        [child('c-1', '小雨')],
+        'Asia/Shanghai',
+      ),
+    )
+    expect(csv.split('\r\n')[1]).toContain("\"'=1+1,2\"")
+  })
+
+  it('空记录也产出表头，不产出空串：打开就是一片空白会被当成坏了', () => {    expect(stripBom(exportCsv([], [], 'Asia/Shanghai'))).toBe('时间,孩子,类型,详情,记录人,备注\r\n')
   })
 
   it('导出以 UTF-8 BOM 起头：没有它 Excel 会把中文显示成乱码', () => {

@@ -497,6 +497,10 @@ git commit -m "feat(mobile): add api endpoints and pinia stores with per-family 
 
 ### Task 4: 游客欢迎页与只读预览（含主题切换）
 
+> **2026-10-20 追记：本任务产出的 `pages/welcome/index.vue` 已整页删除**，游客改为直接进四个 Tab 页，
+> `preview` 改名「功能教学」搬进"我的"——见 `specs/2026-10-20-guest-mode-design.md`。下面的步骤作为
+> 当时的执行记录保留，照做会得到一个已不存在的页面。
+
 **Files:**
 - Create: `apps/mobile/src/pages/welcome/index.vue`
 - Create: `apps/mobile/src/pages/preview/index.vue`

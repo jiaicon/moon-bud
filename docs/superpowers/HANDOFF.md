@@ -171,7 +171,8 @@ MEMBER，邀请页把生成/撤销码画给了 MEMBER，而后端归档只认 OW
 
 评审"放弃判断"的 5 条按现状定案：v1 保留归档入口（只加了实话文案与确认，`I-4` 缺位时它是
 唯一出口）；PATCH 风险按文档承担，不在后端加 POST 别名；`u-subsection` 留着不换 chips；
-游客 H5 深链不加守卫（H5 只是调试面）；`welcome` 的"继续注册"不做回访面板。
+游客 H5 深链不加守卫（H5 只是调试面）；`welcome` 的"继续注册"不做回访面板（2026-10-20 更新：`welcome`
+整页已删，见（十五））。
 `#ifdef APP-PLUS` 是否包含 `APP-HARMONY` 本地无法证实，BUILD.md 已把"鸿蒙没有 plus API"
 写成前提，出包时才可能暴露。
 
@@ -551,7 +552,7 @@ H5 真跑：登录一次性 QA 家庭（2 孩子 6 记录，含带逗号的孩�
 
 **触发时机**：`App.onShow` 回前台、`onNetworkStatusChange` 转联网各 `flush()` 一次；列表 `onLoad` 先
 `outbox.load()`（顺带 `isStale` 清掉过期项）。**登出清空队列**（`auth.logout` 调 `outbox.clear()`，
-主动退出即丢弃上一账号的待同步写）；**会话过期不走这条**——被踢回欢迎页不该顺手丢掉用户没传完的记录。
+主动退出即丢弃上一账号的待同步写）；**会话过期不走这条**——被甩回首页游客态不该顺手丢掉用户没传完的记录。
 
 **表单接线**（`event-form/index.vue`）：create/update/delete 全改走 `outboxStore.submit*`，返回
 `{kind:'saved'|'queued'}`；`queuedToast` 把"已记录/已更新/已删除"在排队时换成"已存到待同步，恢复网络后
@@ -730,6 +731,159 @@ Asia/Shanghai 同一瞬间落到不同日期的对照）。闸门 `stats-wiring`
 按孩子定作用域）——这是诚实的，但"本机有 3 条待同步却一个数都看不到"的场景仍然存在；真要治得让孩子
 名单也落到本地缓存，属另一件事。
 
+### 2026-10-20（周二）（十五）：未登录也能进应用（游客态，含欢迎页之死）
+
+用户这轮提的三件事：① 未登录可以进系统，只是未登录状态；② 功能预览改成"教学"页放进"我的"；
+③ 注意未登录时的引导。设计见 `specs/2026-10-20-guest-mode-design.md`（决定全部由用户拍板，逐条在里面）。
+
+**做了什么**
+- `pages.json` 第一条换成 `pages/home/index`；`pages/welcome/index.vue`、`utils/preview-visited.ts`、
+  `pages/__tests__/welcome-session.test.ts` 删除。源闸用例（`guest-launch.test.ts`）现在扫整个 `src`，
+  任何地方再写 `pages/welcome` 直接红。
+- 会话从"有/没有"改成**三态**：`auth.session ∈ 'unknown' | 'guest' | 'member'`（由 `sessionResolved` 驱动）。
+  这一层是为了不说谎：冷启动第一帧内存态必然是 null，把它当游客就等于对老用户喊"来登录吧"；
+  而断网问不出真相的那一趟，两个答案都不该出口——首页那一屏写"正在确认登录状态"。
+- 四个 Tab 页在会话没落定前不读任何东西，游客**0 发请求**（浏览器实证：Network 面板空）；
+  tabBar 未读角标同一条 `if (!authStore.isLoggedIn) return` 挡掉——替上一个账号保管未读数没有意义。
+- 引导落在**空状态本身**：`guest/guide.ts` 是唯一文案来源，`GuestGuide.vue` = 主按钮「登录 / 注册」
+  + 一条「先看看它能做什么」。游客页面上不出现任何新增入口（FAB 由 `!isGuest` 收起）。
+- "我的"的每一行都留着，点了才问：`guest/gate.ts` 是默认拒绝的白名单（只有教学 + 主题设置免登录），
+  命中门禁弹确认框（「去登录 / 再想想」），确认落 `?mode=register` 的登录页。时区那一行对游客降级成
+  普通行（原来是可以滚的原生 picker）。
+- 会话过期不再甩去登录页：`handleSessionExpired()` = 清会话 + `reLaunch` 首页游客态 +
+  一句 `登录已过期，重新登录就能接着记。`。登录成功统一回首页。
+
+**顺带挖出并修掉的真 bug**
+- **换账号后 Tab 页还挂着上一个身份的骨架**：`switchTab` 不销毁已存在的页面实例，登录后回到首页/
+  记录/提醒看到的是游客那一趟留下的空数据。三个页面各记一份 `loadedForUser`，账号变了就重拉；
+  首页另加 `enterFlight` 单飞（onLoad 与紧随的 onShow 会同时 await bootstrap）。
+- **中途过期其实不会触发那句提示**：`http.ts` 里"续期失败"这一支原本
+  `if (err instanceof ApiRequestError) throw err` —— refresh token 过期/被撤销时服务端正是回 401 的
+  `ApiRequestError`，于是人停在原页面反复撞同一个 401，会话也不清。现在按状态码补报
+  （401 且本地确有会话才算失效；statusCode 0 的网络失败仍不算，否则断网等于替他登出）。
+  单测两条：`续期自己返回 401 时同样算会话失效`（RED→GREEN）、
+  `续期是网络失败时不算会话失效`（锁定用例）。真机路径靠把 API 的 `JWT_ACCESS_TTL` 临时调成 15s
+  + 把 storage 里的 refresh token 改坏复现：观察到 toast 原文、`location.hash` 回到 `#/`、两个 token 归零。
+
+**这一轮的 rulings（都是我的判断，不是用户说的）**
+- 免登录白名单里**没有** `dup-window-settings`（设计文档写的是"教学 + 主题 + 关于"，而"关于"不是一个
+  路由；"我的"页本身游客可进，关于信息就在页内）。代价：游客想试"重复提醒提示"要先登录。
+- 首页的家庭/孩子切换器对游客整块隐藏（`v-if="!isGuest"`）而不是置灰——留着会把"没有家庭"画成
+  一个可选的东西。**当天就被用户推翻了**，见（十六）：现在画两格占位、值为短横线。
+- 过期落点用 `reLaunch` 而非 `switchTab`：人可能停在任何页面，那些页面骨架里挂着上一个家庭的数据。
+- 游客在"我的"底部那颗按钮写作「登录 / 注册」，替掉的是"退出登录"——游客没有可退出的东西。
+- `mustChangePassword` 守卫与 family-select 的重定向原样保留：它们判的是"有没有会话"，游客根本进不到。
+
+**验证**：`apps/mobile` vitest **82 文件 / 602 用例全绿**，`vue-tsc --noEmit` 干净，
+`build:h5`、`build:app` 均 DONE。浏览器侧走通：游客四屏引导 + 0 请求、门禁弹窗落登录页、
+注册→建家庭→加孩子→首页满血、冷启动过期（静默回游客）、中途过期（首页 + toast）。
+一次性 QA 账号（`qa_guest_1020`、`qa_exp_1020` 与 8 个撞名字用的探测号）已按 family→member→user 删净；
+`my_home` 与更早的 `ui_check_*` 未动。
+
+**仍欠**：`gate.test.ts` 的 9 条没有见证过 RED（写的时候实现已在），它挡的是后续改动，不证明当初的实现。
+Android 侧要重出包才带得上这一轮（HBuilderX 发行 → 原生 App-云打包）。
+
+### 2026-10-20（周二）（十六）：游客看得到整副骨架，引导只占空白区
+
+用户看着（十五）的产物提的：首页只剩一张引导海报，"类似首页，未登录的游客，可以将原本页面的
+功能都显示出来，引导登录的组件放在空白区域。记录、提醒页也是这个逻辑"。三个追问的答复：
+空值"显示无或者短横线都行，你自己决定"（选了 `—`）；"+ 新增"按钮"可以不显示，保持界面简洁"；
+首页切换器"显示短横线吧"。
+
+**规矩**：游客看到与会员**同一副骨架**，数据位一律 `—`，引导坐在内容空白区（不是页面最上面），
+每一点可交互处只问一句、绝不落到写路径或请求上；写入控件（FAB）继续不出现。
+
+- 首页：游客的两格切换器占位（家庭/孩子 → `—`，点了 `gate('家庭')` / `gate('孩子')`）；概览三行
+  走新的 `buildGuestOverviewRows()`（`home-view.ts`）——不能借 `buildOverviewRows(null)`，那份念的
+  是"今天还没有 / 0 次"，是一句关于某个真实孩子的断言，而游客连家庭都没有；其下是引导、
+  记一笔九宫格、看趋势入口。
+- 记录页：筛选栏（类型芯片 + ☰ 抽屉 + 日期区间 + 导出 CSV）与会员共用同一份模板，引导在列表空白区。
+  孩子/记录人两行是数据驱动，游客本来就没有，不画占位。待同步横幅加了 `!isGuest`——那一队是
+  上一个账号留在这台手机上的。
+- 提醒页：三段 `u-subsection` 与「提醒中心」链接都在引导之上；三格的分段与提醒中心各自
+  `gate('提醒分段')` / `gate('/pages/notification-center/index')`。
+- 三页各自长出一个 `gate(key)` 助手（`if (!authStore.isGuest) return false` + `confirmLoginGate`）：
+  判断不散进模板的 `@click`，否则加一个控件就有人漏掉游客。
+- `guest/gate.ts` 多了 `GATE_ACTION_KEYS`（家庭 / 孩子 / 记一笔 / 筛选 / 导出 CSV / 提醒分段），
+  每一句提示语各不相同且都写明"登录后能得到什么"——源闸用例盯着这两件事。
+
+**测试跟着规矩改了三处**（旧断言挡的是上一版布局，不是 bug）：
+`guest-guide.test.ts` 里"游客那句排在『还没有家庭』之前"换成更强的"游客根本走不进『还没有家庭』
+那一格"（认 `v-else-if="!isGuest && !familyId"`）；首页切换器那一格从"看不见"改成"画短横线、
+点了问一句、且不许出现真切换器组件"；`children-unknown-vs-none.test.ts` 期望的守卫串跟着加了
+`!isGuest &&`。新增的骨架用例先见证 5 条 RED，再转 GREEN。
+
+**验证**：`apps/mobile` vitest **82 文件 / 608 用例全绿**，`vue-tsc --noEmit` 干净，`build:h5`、
+`build:app` 均 DONE。浏览器实证：游客三屏骨架齐画、值全为 `—`、引导在空白区；点记一笔 / 类型芯片 /
+导出 / ☰ / 分段 / 提醒中心各自弹出**互不相同**的那句话且没有导航；**Network 面板 0 条 /api 请求**。
+会员一侧回归：临时账号走过首页（真切换器 + 还没有孩子）、记录（还没有孩子）、提醒（三段 + 空态 + FAB），
+引导一律不出现；该账号（`qa_skel_1020`）连同家庭已按 family→member→user 删净。
+
+### 2026-10-20（周二）（十七）：全功能巡检第二批（#70…#81，共 12 处）
+
+指令还是那句"按照你的想法，测试优化一遍所有功能，不要有隐藏隐患"。这一批挑的是同一族问题：
+**界面替用户撒了谎**（加载中说成"没有"、编辑中写着"添加"、夏令时那天没有"昨天"），
+**数据到页边就静静断掉**（提醒只装得下 50 条、待办只数第一页），以及**一处真正的账号安全问题**
+（改密后旧 access token 还在有效期内）。逐条与它的证明所在地：
+
+- **#70 「每两天」的网格不再随日期漂**：间隔型规则的锚点取创建时刻，晚两天进前台，该排的还是那天
+  （`reminders/__tests__/occurrence-window.test.ts`）；周期预设的中文标签与它真正生成的 rrule 一致，
+  钉死哪天就说哪天，不许叫"同一天"（`reminders/__tests__/rrule-presets.test.ts`）。
+- **#71 导出的 CSV 不会被 Excel 当成公式执行**（备注以 `=`/`+`/`-`/`@` 开头时前置单引号落成文本），
+  且导出与屏幕上看到的是同一份内容（时间按账号时区、对不上号的孩子写"未知孩子"而不是留空）——
+  `events/__tests__/csv-export.test.ts`、`pages/__tests__/event-list-export.test.ts`。
+- **#72 强制改密拦不住返回键**：`guardForcedChange` 在人已经站在改密页时不再叠第二层，
+  从改密页按返回退回首页后，下一次回到本页还得再拦一次；页面栈读不出来时宁可拦
+  （`utils/__tests__/forced-change.test.ts` + `pages/__tests__/forced-change-wiring.test.ts`）。
+- **#73 游客深链不再谎报"登录已过期"**：`blockGuestDeepLink` 确认是游客才送回首页并告知页面别再往下跑；
+  冷启动时会话还没问出来先问一次；**断网问不出真相时不算游客**，那一屏该说"没读到"而不是"来登录"
+  （`guest/__tests__/deep-link.test.ts` + `pages/__tests__/guest-deep-link.test.ts`）。
+- **#74 待同步队列不再被会话问题逐条烧掉**：`stepFor` 把 401 判成"这台手机的会话坏了"→ `await-session`，
+  不吃这条记录的重试额度；400/403 才算记录自己的事；网络没通时整趟停下；落盘失败不再把异常抛到界面
+  （`sync/__tests__/outbox-policy.test.ts`、`stores/__tests__/outbox-flush.test.ts`）。
+- **#75 返回退无可退时把人送去首页**，而不是留在原地；栈读不出来按最保守走法
+  （`utils/__tests__/back-nav.test.ts` + `pages/__tests__/step-back-wiring.test.ts`）。
+- **#76 加载中不说成"没有" + 邀请时效不再被静默替换**：孩子名单读砸了说"没读到"、未读数取回前只说
+  "正在数…"；邀请有效小时走 `inviteWindow`，`0`/负数/小数/超过一个月当场说清是哪一格的问题，
+  不再被 `Number(hours) || 72` 顶掉（`pages/__tests__/loading-not-empty.test.ts`、`invite/__tests__/invite-window.test.ts`）。
+- **#77 通知按类型分流 + 找回请求真的挂在管得了的那一家**：客户端按 `occurrenceId` 判断落点
+  （有 → 提醒页，无 → 成员页，必要时先切家庭），不再把"有人要重置密码"点开成提醒列表
+  （`notifications/routing.ts` + 两个测试文件）；后端 `notifyManagers` 改为**按 userId 归并、直接用
+  真的 familyId**，不再按家庭名回找——两个同名家庭时按名字找到的那一家里根本没有管理员（用例
+  "请求人名下有两个同名家庭时…" 先见证 RED：它拿到了请求人独占的那一家的 UUID）。
+- **#78 编辑时导航栏不再写着"添加孩子/记一笔/新建提醒"**：三处 `setNavigationBarTitle` 按 id 分支，
+  源闸用例盯这个三元（`pages/__tests__/form-nav-title.test.ts`）。
+- **#79 一页装不下时不再断**：待办列表与提醒本地武装都改成翻页拉全（`PAGE_SIZE` 100 / 最多 10 页；
+  提醒页 50 条一页 + 「加载更多」，`hasMore` 认服务端的 `total`），首页概览把待同步行一起数进来
+  （新组合子 `sync/pending-view.ts:mergePendingRows`，按 id 去重，所以响应丢了一次也不会双计）。
+- **#80 统计不再指着旧图说新名字 + 夏令时那天有"昨天"**：`loadedChildId` 在取数成功那一刻才更新，
+  图表与标题同源；昨天/今天的 key 走 `adjacentDayKey`（墙上日历日加减），不给瞬间加 24 小时——
+  夏令时切换那天只有 23 或 25 小时（`pages/__tests__/stats-scope-child.test.ts`、
+  `events/__tests__/day-groups.test.ts` 的新用例，`reminders/due-label.ts` 里那份私有副本删掉、共用同一个）。
+- **#81 改密后旧 access token 立刻作废**（详见下一小节）。
+
+**验证**：`apps/mobile` vitest **98 文件 / 690 用例全绿**，`vue-tsc --noEmit` 干净；
+`apps/api` e2e **15 套 / 149 用例全绿**（`--runInBand`），`tsc --noEmit` 干净；`build:h5`、`build:app` 均 DONE。
+浏览器实证（游客，全新文档）：首页两格 `—` + 引导、记录页骨架 + 引导、提醒页三段 + 引导，
+**0 条后台请求**；记录页点「导出 CSV」出"需要登录/导出把这一家记下的东西导成表格给医生看…"，
+「去登录」落到 `#/pages/login/index?mode=register`。
+
+#### #81 的做法与代价（下次别改回秒精度）
+
+`users` 多了一列 `passwordChangedAt`（迁移 `20261020090000_add_password_changed_at`，
+**开发库 `moonbud` 与测试库 `moonbud_test` 都已手工 `migrate deploy`**，存量行回填成 `createdAt`）。
+`change-password` 与成员页的 `reset-password` 都写这一列；`TokenService.issue` 把**签发当时的这一列**
+塞进 access token 的 `pwdAt` 声明；`JwtStrategy.validate` 改成 async，读一次 `PrismaService`，
+`pwdAt < 当前 passwordChangedAt` 就 401"密码已变更，请重新登录"。
+
+- **为什么不比 `iat`**：`iat` 只有秒精度且向下取整，"改完密码顺手签发的新 token"和 `passwordChangedAt`
+  常落在同一秒内——第一版就是这么写的，单独跑 `passwords` 套件全绿，**全量跑就红了**（那一秒真的会撞上）。
+  毫秒水位把这条竞态彻底消掉；`pwdAt` 缺失的老 token（部署前签发的）退回按 `iat*1000` 判断，
+  代价只是那一秒内刚登录的人多半要重登一次，且只在老 token 自然过期（≤2h）之前。
+- **代价**：每个需要登录的请求多一条 `SELECT passwordChangedAt FROM users`（主键查询）。
+  `passwordChangedAt IS NULL` 时无从判断，一律放行——回填之后正常路径不会有 null。
+- 客户端不需要改：401 → 静默 refresh → refresh 也坏才踢回登录，正是想要的行为。
+
 ### 待真机验证（本地跑不了，非缺陷）
 
 
@@ -759,4 +913,24 @@ Asia/Shanghai 同一瞬间落到不同日期的对照）。闸门 `stats-wiring`
   `--u-bg-white`；只测 documentElement 上的变量会得出错误结论，要看弹层自己的计算样式。
 - **H5 里 `uni.showToast` 复用同一个 `.uni-toast` 元素**：用 MutationObserver 的 `addedNodes`
   数 toast 会漏掉第二次及以后的每一次，看起来像"没弹"。要数调用次数就包装 `window.uni.showToast`。
+- **改 `apps/api/prisma/schema.prisma` 后 `npx prisma generate` 会 `EPERM` 重命名 query engine DLL**
+  ——常驻的 `node dist/main.js` 正占着它。类型其实已经写进去了（`index.d.ts` 里有新字段就能用），
+  要干净就先把 :3000 那个进程停下再生成。
+- **`prisma migrate deploy` 默认读 `apps/api/.env`，那是开发库 `moonbud`。** 测试库 `moonbud_test`
+  要另跑一次并显式覆盖 `DATABASE_URL`，否则 e2e 一上来就撞"列不存在"。两边都别忘了。
+- **量"游客有没有发请求"必须硬重载**：只改 `location.hash` 是同一份文档，`performance`
+  的资源缓冲与 pinia 里的旧数据都不清零，会把登录期的请求算进来、也会让上一个账号的孩子芯片还在屏幕上。
+  另外这个 app 直连 `http://127.0.0.1:3000/api/...`，按 `localhost:5173/api/` 过滤会一条都抓不到。
+
+### 本轮（十七）明确留下的
+
+- **Minor（没动）**：部分文字对底色对比度仍低于 WCAG AA；若干可点区域不足约 44pt（筛选行、📷/⧉ 图标）。
+  这两件都要真机上看，改法会牵动整套主题令牌，不是巡检该顺手做的。
+- **找回请求的限流只做在账号维度**：同一账号 10 分钟内只登记一次、只通知一次；**没有 IP/全局速率上限**，
+  因为要它就得引入一份非持久计数或 Redis。现在的形态是"刷屏被打掉，成本是一次 202 空转"。
+- **开发库里还留着上一轮 UI 检查的账号**：`ui_check_01…04` 与家庭"UI检查家庭"（以及它们的种子数据）。
+  本轮只删了自己点名要清的 `qa_walk_1020` / 家庭 `2c993ee0…` / 邀请码 `9GKHK57J`。
+  要不要一并清掉由用户定——它们可能被拿去手动登录。
+- **游客看得到 FAB 的说法**：记录/提醒页没有 FAB，首页仍画"记一笔"（点了只问一句）。
+  用户当时说的是"可以不显示"，不是"必须不显示"，所以留着当入口。
 

@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common'
+import { Inject, Injectable } from '@nestjs/common'
 import { normalizeUsername } from '@moonbud/shared'
 import { PrismaService } from '../prisma/prisma.service'
+import { PUSH_PROVIDER, type PushProvider } from '../push/push-provider.interface'
 import { hashPassword } from './password.util'
 
 /** 恒定文案：它必须同时适用于"账号存在"与"账号不存在"。 */
@@ -18,7 +19,10 @@ const NOTIFY_COOLDOWN_MS = 10 * 60 * 1000
  */
 @Injectable()
 export class ResetRequestService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(PUSH_PROVIDER) private readonly push: PushProvider,
+  ) {}
 
   async request(rawUsername: string): Promise<{ message: string }> {
     const username = normalizeUsername(rawUsername)
@@ -91,17 +95,21 @@ export class ResetRequestService {
     }
 
     for (const [managerId, entry] of seen) {
+      // 取这位管理员确实管理着的那一家：客户端点开通知会据此切到对应的
+      // 成员列表，指到一间他不在里面的家庭等于把人带进 403。
+      const familyId = entry.familyIds[0]
+      const title = '有人需要重置密码'
+      const body =
+        `${username} 提交了找回密码请求（家庭：${[...entry.names].join('、')}）。` +
+        '请在成员列表里为该账号设置临时密码。'
+
       await this.prisma.notification.create({
-        data: {
-          userId: managerId,
-          // 取这位管理员确实管理着的那一家：客户端点开通知会据此切到对应的
-          // 成员列表，指到一间他不在里面的家庭等于把人带进 403。
-          familyId: entry.familyIds[0],
-          title: '有人需要重置密码',
-          body: `${username} 提交了找回密码请求（家庭：${[...entry.names].join('、')}）。`
-            + '请在成员列表里为该账号设置临时密码。',
-        },
+        data: { userId: managerId, familyId, title, body },
       })
+
+      // 站内通知只有打开 App 才看得见，而"忘了密码来找你"偏偏发生在没人开着 App 的时候。
+      // push.send 内部不会抛（实现方契约），所以这里不必为它写 try。
+      await this.push.send(managerId, title, body, { familyId, kind: 'password_reset' })
     }
   }
 }

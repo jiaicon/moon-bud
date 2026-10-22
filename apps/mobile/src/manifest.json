@@ -5,8 +5,10 @@
     // "基础配置"→appid 右侧"重新获取"，但那会让个推侧的 cid 全部失效（见 BUILD.md 第 2 节）。
     "appid" : "__UNI__9B2D760",
     "description" : "一家人一起记，孩子的一天看得见",
-    "versionName" : "1.0.0",
-    "versionCode" : "100",
+    // 每出一个云打包包，versionCode 必须 +1：同签名同 versionCode 在小米上能覆盖安装，
+    // 但应用商店要求严格递增，重复的号会被拒收。versionName 给人看，跟着走就行。
+    "versionName" : "1.0.1",
+    "versionCode" : "101",
     "transformPx" : false,
     /* 5+App特有相关 */
     "app-plus" : {

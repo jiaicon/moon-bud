@@ -1,0 +1,10 @@
+{
+  "name": "push",
+  "version": "1.0.0",
+  "description": "月芽 uni-push 2.0 服务端发送入口，由 NestJS 经云函数 URL 化调用",
+  "main": "index.js",
+  "dependencies": {},
+  "extensions": {
+    "uni-cloud-push": {}
+  }
+}

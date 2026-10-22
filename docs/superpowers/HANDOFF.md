@@ -992,14 +992,19 @@ Android 侧要重出包才带得上这一轮（HBuilderX 发行 → 原生 App-�
   依据是"MIUI 允许自启动 + 省电无限制时，本地定时在 App 被划掉后仍能弹"。**这条还没在真机验证过**
   （BUILD.md 第 8 节 spike 第 3 问）。若验证结果相反（划掉后不弹，而推送能弹），把默认值改成 `true`，
   并**另外设计本地排程与推送的互斥开关**——两边都开会让同一条提醒弹两次。改默认值不需要动 provider 代码，
-  门控测试（`getui-push.provider.e2e-spec.ts` 契约 1）钉的是行为，不是值。
-- **个推鉴权失效的具体码值仍未确认，但已不承重**：终审指出"只按 401/`AUTH` 字样判断"会让一张过期 token
-  永远用下去（进程不重启就永久停发，日志只说"推送失败"）。现在改成**任何失败都丢 token、重取、再发一次**，
-  第二次仍失败才 warn。真凭证到位后仍要看一眼实际码族，用来判断"这次失败到底是不是鉴权"，但不再影响能不能自愈。
+  门控测试（`unicloud-push.provider.e2e-spec.ts` 契约 1）钉的是行为，不是值。
+- **服务端通道在 2026-10-22 换过一次：个推 REST 直连 → 我们的 uniCloud 云函数**，因为 uni-push 2.0
+  官方禁止第三方服务端直连个推 api，2.0 应用也拿不到 MasterSecret（详见 BUILD.md 第 7 节）。
+  随之作废的假设不用再管：个推 `/auth` 的鉴权失效码族、token 缓存自愈那套，实现已经整体删掉了。
+  **新的未验证项**：云函数 `sendMessage` 失败时回的是 `{errCode, errMsg}` 而不是抛异常（官方文档说法），
+  以及 `settings.ttl` 的单位是不是毫秒——都要真机/真调用确认；日志里已经能把这两类区分开。
 - **入家申请审批目前不产生通知，因此也没有推送**：`join requests` 那一路只写库、没人被通知去看，
   管理员只能自己进成员页才发现有人在等。这是既有缺口，本轮没有补（补它就是再加一处
   `notification.create` + `push.send`，形态和找回密码那条一样）。
-- **服务器 `.env` 的键还没填值**：`GETUI_APPID` / `GETUI_APPKEY` / `GETUI_MASTER_SECRET` /
-  `XIAOMI_PUSH_CATEGORY` / `PUSH_REMINDER_DUE` 已写进本地 `.env`、`.env.example` 和
-  `deploy/compose.prod.yml` 的透传列表（空值不会让容器起不来）。**值归用户**，写在服务器上
-  `/home/workspace/moon-bud/.env`（chmod 600），别贴到聊天里。
+- **服务器 `.env` 的键换了名字，值还没填**：`UNICLOUD_PUSH_URL` / `UNICLOUD_PUSH_TOKEN` /
+  `PUSH_REMINDER_DUE` 已写进 `.env.example` 和 `deploy/compose.prod.yml` 的透传列表（空值不会让容器
+  起不来）；旧的 `GETUI_*` 与 `XIAOMI_PUSH_CATEGORY` 已从仓库和服务器上删除。**值归用户**，写在服务器上
+  `/home/workspace/moon-bud/.env`（chmod 600），别贴到聊天里；`UNICLOUD_PUSH_TOKEN` 必须与云函数
+  环境变量 `PUSH_TOKEN` 完全一致，不一致时 api 日志会直说"不匹配"。
+- **uniCloud 支付宝云免费版每月要手动续期**（到期第二天停服、资源保留 7 天后销毁、不会自动转按量）。
+  这条路线唯一的持续人工成本，忘了就表现为"手机不再响"。

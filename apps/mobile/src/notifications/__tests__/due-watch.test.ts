@@ -20,17 +20,33 @@ function notify(id: string, opts: { occurrence?: string | null; title?: string }
   }
 }
 
-const toasts: string[] = []
+interface ModalCall {
+  title?: string
+  content?: string
+  showCancel?: boolean
+  confirmText?: string
+  success?: (res: { confirm: boolean; cancel: boolean }) => void
+  complete?: () => void
+}
+
+const modals: ModalCall[] = []
 const g = globalThis as Record<string, any>
 let restore: (() => void) | null = null
 
+/** 弹窗要人点才关：测试里手动补上那一下点击。 */
+function tapConfirm(): void {
+  const last = modals[modals.length - 1]
+  last?.success?.({ confirm: true, cancel: false })
+  last?.complete?.()
+}
+
 beforeEach(() => {
-  toasts.length = 0
+  modals.length = 0
   listMock.mockReset()
   const before = g.uni
   g.uni = {
     ...before,
-    showToast: (arg: { title?: string }) => toasts.push(arg.title ?? ''),
+    showModal: (arg: ModalCall) => modals.push(arg),
   }
   restore = () => {
     g.uni = before
@@ -117,22 +133,61 @@ describe('轮询的那层壳', () => {
     listMock.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 })
     startDueWatch()
     await vi.advanceTimersByTimeAsync(0)
-    expect(toasts).toEqual([])
+    expect(modals).toEqual([])
 
     listMock.mockResolvedValue({ items: [notify('n-1', { title: '吃辅食' })], total: 1, page: 1, pageSize: 20 })
     await vi.advanceTimersByTimeAsync(60_000)
-    expect(toasts).toEqual(['到点了：吃辅食'])
+    expect(modals.map((m) => m.content)).toEqual(['到点了：吃辅食'])
+  })
+
+  it('弹的是要人点一下才关的模态框：没有取消键', async () => {
+    vi.useFakeTimers()
+    listMock.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 })
+    startDueWatch()
+    await vi.advanceTimersByTimeAsync(0)
+
+    listMock.mockResolvedValue({ items: [notify('n-1')], total: 1, page: 1, pageSize: 20 })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(modals).toHaveLength(1)
+    expect(modals[0].showCancel).toBe(false)
+    expect(modals[0].confirmText).toBe('知道了')
+  })
+
+  it('上一个还没点掉时不叠第二个，新到点的那条留到下一轮再弹', async () => {
+    vi.useFakeTimers()
+    listMock.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 })
+    startDueWatch()
+    await vi.advanceTimersByTimeAsync(0)
+
+    listMock.mockResolvedValue({ items: [notify('n-1')], total: 1, page: 1, pageSize: 20 })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(modals).toHaveLength(1)
+
+    listMock.mockResolvedValue({ items: [notify('n-1'), notify('n-2', { title: '洗澡' })], total: 2, page: 1, pageSize: 20 })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(modals).toHaveLength(1)
+
+    tapConfirm()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(modals.map((m) => m.content)).toEqual(['到点了：喂奶', '到点了：洗澡'])
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(modals).toHaveLength(2)
   })
 
   it('弹过的不会在下一次轮询里重弹', async () => {
     vi.useFakeTimers()
-    listMock.mockResolvedValue({ items: [notify('n-1')], total: 1, page: 1, pageSize: 20 })
+    listMock.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 })
     startDueWatch()
     await vi.advanceTimersByTimeAsync(0)
-    expect(toasts).toEqual([])
+
+    listMock.mockResolvedValue({ items: [notify('n-1')], total: 1, page: 1, pageSize: 20 })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(modals).toHaveLength(1)
+    tapConfirm()
 
     await vi.advanceTimersByTimeAsync(120_000)
-    expect(toasts).toEqual([])
+    expect(modals).toHaveLength(1)
   })
 
   it('拉不到就当这轮没发生：既不弹，也不把见过的当作弹过', async () => {
@@ -140,16 +195,16 @@ describe('轮询的那层壳', () => {
     listMock.mockRejectedValue(new Error('离线'))
     startDueWatch()
     await vi.advanceTimersByTimeAsync(0)
-    expect(toasts).toEqual([])
+    expect(modals).toEqual([])
 
     listMock.mockResolvedValue({ items: [notify('n-1')], total: 1, page: 1, pageSize: 20 })
     await vi.advanceTimersByTimeAsync(60_000)
     // 上一轮没读到，这一轮仍是"第一次"，只记底不弹——离线期间攒下的不该一起炸出来。
-    expect(toasts).toEqual([])
+    expect(modals).toEqual([])
 
     listMock.mockResolvedValue({ items: [notify('n-1'), notify('n-2', { title: '洗澡' })], total: 2, page: 1, pageSize: 20 })
     await vi.advanceTimersByTimeAsync(60_000)
-    expect(toasts).toEqual(['到点了：洗澡'])
+    expect(modals.map((m) => m.content)).toEqual(['到点了：洗澡'])
   })
 
   it('退出登录后复位：换账号不该把上一家的人看到的进度带过来', async () => {
@@ -162,6 +217,6 @@ describe('轮询的那层壳', () => {
     resetDueWatch()
     await vi.advanceTimersByTimeAsync(180_000)
     expect(listMock).toHaveBeenCalledTimes(1)
-    expect(toasts).toEqual([])
+    expect(modals).toEqual([])
   })
 })

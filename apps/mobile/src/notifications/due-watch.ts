@@ -22,7 +22,7 @@ export interface DueWatchPlan {
  * 是"有空来看一眼"，不该在一分钟一次的轮询里突然冒出来吓人。
  *
  * `seenIds === null` 表示"第一次"——冷启动、换账号、离线之后重新读到都算。这时
- * 只记底不弹：服务端已经攒了三条的话，一次性炸出三张 toast 是骚扰，不是提醒，
+ * 只记底不弹：服务端已经攒了三条的话，一次性连弹三个要人点掉的框是骚扰，不是提醒，
  * 而那三条本来就由本地推送或角标说过了。
  */
 export function planDueWatch(items: NotificationDto[], seenIds: string[] | null): DueWatchPlan {
@@ -38,7 +38,7 @@ function cap(ids: string[]): string[] {
   return ids.length > MAX_SEEN ? ids.slice(ids.length - MAX_SEEN) : ids
 }
 
-/** 一条报名字，多条只报数：toast 那一小条宽度念不下一串。 */
+/** 一条报名字，多条只报数：一屏念不完一串名字，而要点掉的框更不该塞满。 */
 export function dueWatchMessage(items: NotificationDto[]): string {
   if (items.length === 1) return `到点了：${items[0].title}`
   return `${items.length} 条提醒到点`
@@ -46,6 +46,23 @@ export function dueWatchMessage(items: NotificationDto[]): string {
 
 let seen: string[] | null = null
 let timer: ReturnType<typeof setInterval> | null = null
+/** 屏幕上是不是已经压着一个没点掉的框。 */
+let alertOpen = false
+
+function showDueAlert(items: NotificationDto[]): void {
+  alertOpen = true
+  uni.showModal({
+    title: '到点了',
+    content: dueWatchMessage(items),
+    showCancel: false,
+    confirmText: '知道了',
+    // 用 complete 而不是 success：不管是点确认、按返回键还是别的路子收掉，
+    // 这一句都要跑到 —— 漏一次就把后面的提醒全哑掉了。
+    complete: () => {
+      alertOpen = false
+    },
+  })
+}
 
 async function tick(): Promise<void> {
   let items: NotificationDto[]
@@ -57,10 +74,14 @@ async function tick(): Promise<void> {
     return
   }
   const plan = planDueWatch(items, seen)
-  seen = plan.seen
-  if (plan.surface.length > 0) {
-    uni.showToast({ title: dueWatchMessage(plan.surface), icon: 'none' })
+  if (plan.surface.length === 0) {
+    seen = plan.seen
+    return
   }
+  // 已经压着一个框就别再叠：那几条不进"见过"，等这一框点掉之后下一轮照样会弹。
+  if (alertOpen) return
+  seen = plan.seen
+  showDueAlert(plan.surface)
 }
 
 /**
@@ -68,6 +89,9 @@ async function tick(): Promise<void> {
  *
  * 本地推送是"App 在后台或系统层面排定的那一响"——App 正开着时它不一定响，
  * 而家长盯着屏幕的那一刻恰恰最需要被提醒。回前台会先问一次，之后每分钟一次。
+ *
+ * 弹的是模态框而不是 toast：到点这件事必须被看见，而 toast 三秒就自己没了，
+ * 家长正抱着孩子、手上一滑就错过了，错过之后屏幕上什么都不剩。
  */
 export function startDueWatch(): void {
   if (timer) return
@@ -85,4 +109,5 @@ export function stopDueWatch(): void {
 export function resetDueWatch(): void {
   stopDueWatch()
   seen = null
+  alertOpen = false
 }

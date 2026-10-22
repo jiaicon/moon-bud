@@ -1,9 +1,12 @@
 /**
- * 通知渠道 id。定下就别改：安卓 8+ 的规则是渠道一旦建好，App 自己就再也改不动它的
- * 重要度（只有用户能在系统设置里改），换 id 等于重新建一个渠道，旧的那些还留在
- * 用户的通知设置列表里。
+ * 通知渠道 id。这不是我们起的名字，是 dumpsys 实测出来的 SDK 自己那条渠道
+ * （`AppSettings: top.iconmen.yueya` 下唯一的渠道，名"消息推送"，原始 importance=3）：
+ * 通知栏里弹出的消息全投在它上面。
+ *
+ * 为什么不能用一个自创的 id：那样只会多建一条谁都不往里投通知的渠道 —— 用户的设置里
+ * 确实多了一格"到点提醒"，实际响法一点没变。要改就得改在真正被用的那一条上。
  */
-export const PUSH_CHANNEL_ID = 'moonbud-reminder'
+export const PUSH_CHANNEL_ID = 'DcloudChannelID'
 
 /** 4 = IMPORTANCE_HIGH：弹横幅、响系统提示音、按渠道默认震动。 */
 const IMPORTANCE_HIGH = 4
@@ -28,11 +31,12 @@ function channelManager(): ChannelManagerLike | null {
 }
 
 /**
- * 冷启动第一件事里的一件：把推送用的通知渠道按最高档建好。
+ * 冷启动第一件事里的一件：赶在第一条通知弹出来之前，把 SDK 用来弹通知的那条渠道
+ * （id 见 `PUSH_CHANNEL_ID`）按最高档建好。
  *
- * 为什么要抢在第一条通知之前：`force_notification` 的通知是 uni-push SDK 用它自己的
- * 渠道弹的，那个渠道是默认档 —— 实测就是"下拉面板里躺一条，不弹横幅、不响、不震"。
- * 只有把它调高才响，而那是让用户自己去系统设置里发现的开关，家长不会去发现。
+ * 为什么要抢：`force_notification` 的通知就是走这个渠道，建成默认档只能是"下拉面板里
+ * 躺一条，不弹横幅、不响、不震"；而安卓事后不许 App 改已建渠道的重要度 —— 不抢在这一刻，
+ * "提醒很轻"就只剩让用户自己去系统设置里调高这一条路，家长不会去发现。
  */
 export function configurePushChannel(): void {
   const manager = channelManager()

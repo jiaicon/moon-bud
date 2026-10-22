@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { configurePushChannel, PUSH_CHANNEL_ID } from '../push-channel'
+import { configurePushChannel } from '../push-channel'
 
 /**
  * 真机测出来的：通知轻不轻（弹不弹横幅、响不响、震不震）不由消息决定，由安卓 8+ 的
@@ -29,7 +29,10 @@ describe('推送通知渠道', () => {
     configurePushChannel()
 
     expect(setPushChannel).toHaveBeenCalledWith({
-      channelId: PUSH_CHANNEL_ID,
+      // 这个 id 不是我们起的名字：dumpsys 里 SDK 往通知栏投消息用的就是它
+      // （`AppSettings: top.iconmen.yueya` 下唯一一条渠道，原始 importance=3）。
+      // 自创一个 id 只会多建一条没人往里投通知的渠道，看着生效、其实没作用。
+      channelId: 'DcloudChannelID',
       channelDesc: '到点提醒',
       importance: 4,
       enableVibration: true,

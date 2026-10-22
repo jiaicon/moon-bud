@@ -18,8 +18,11 @@ export class NoopPushProvider implements PushProvider {
     body: string,
     data?: Record<string, unknown>,
   ): Promise<void> {
+    // 只记长度：正文写着谁在找回密码、哪一家人。凭证没填的现在就是生产在跑的这一条，
+    // 原样打出去等于把家长的名字永久留在容器日志里。
     this.logger.debug(
-      `[noop-push] 未发送（v1 未接通推送通道）user=${userId} title=${title} body=${body} data=${JSON.stringify(data ?? {})}`,
+      `[noop-push] 未发送（推送通道未配置）user=${userId} titleLen=${title.length}` +
+        ` bodyLen=${body.length} dataKeys=[${Object.keys(data ?? {}).join(',')}]`,
     )
   }
 }

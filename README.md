@@ -52,6 +52,9 @@ cp .env.example .env
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | 双 token 签名密钥。**生产必须换成随机值**：`openssl rand -hex 32` |
 | `JWT_ACCESS_TTL` / `JWT_REFRESH_TTL` | access 2h、refresh 30d。access 只存在内存，refresh 存本地 |
 | `SCHEDULER_ENABLED` | 每分钟提醒扫描的开关。**生产必须为 `true`**，否则提醒不触发；e2e 里被 `test/setup-env.ts` 强制设为 `false` |
+| `GETUI_APPID` / `GETUI_APPKEY` / `GETUI_MASTER_SECRET` | 个推（uni-push 2.0）服务端凭证，取自 DCloud 控制台 UniPP 配置。**三项齐了才启用推送**，缺任一项即退回只写日志，启动日志会写明用的是哪条通道 |
+| `XIAOMI_PUSH_CATEGORY` | 小米"私信/服务类"消息分类 id，商店审批通过后填；不填则请求体里不下发 `category` |
+| `PUSH_REMINDER_DUE` | 到点提醒是否也由服务端推送。**默认 `false`**：本地定时更准时也更抗进程被杀，两边都发会双弹（原因见 `docs/superpowers/specs/2026-10-21-push-notifications-design.md` 第 3 节） |
 
 ### 3. 装依赖
 

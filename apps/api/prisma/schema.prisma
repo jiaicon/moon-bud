@@ -75,6 +75,7 @@ model User {
   assignedReminders    Reminder[]           @relation("ReminderAssignee")
   completedOccurrences ReminderOccurrence[] @relation("OccurrenceCompleter")
   notifications        Notification[]
+  devices              Device[]
 
   @@map("users")
 }
@@ -275,6 +276,22 @@ model Notification {
 
   @@index([userId, readAt, createdAt(sort: Desc)])
   @@map("notifications")
+}
+
+model Device {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  /// 个推 cid。重装 App / 清数据都会换，所以不做"设备指纹"式的合并。
+  clientId   String   @unique
+  platform   String
+  /// 只用于排障："这台设备最后一次报到是什么时候"，不参与投递决策。
+  lastSeenAt DateTime @default(now()) @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("devices")
 }
 
 model FamilyInvite {

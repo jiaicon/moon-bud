@@ -30,6 +30,7 @@ export async function createTestApp(): Promise<INestApplication> {
  * 一笔"首套件假红"的地方。清库只是一条 TRUNCATE，犯不上常驻一条连接。
  */
 const TRUNCATE_ALL = `TRUNCATE TABLE
+  devices,
   notifications,
   reminder_occurrences,
   reminders,

@@ -3,6 +3,7 @@ import { onHide, onLaunch, onShow } from '@dcloudio/uni-app'
 import { rearmLocalNotifications } from './notifications/local-notify'
 import { resyncActiveReminderSchedules } from './notifications/reminder-arming'
 import { startDueWatch, stopDueWatch } from './notifications/due-watch'
+import { registerPushClient, startPushClickHandler } from './notifications/push-client'
 import { refreshUnreadTabBadge } from './notifications/tab-badge'
 import { useAuthStore } from './stores/auth'
 import { useDupWindowStore } from './stores/dup-window'
@@ -22,6 +23,9 @@ onLaunch(() => {
   uni.onNetworkStatusChange((res) => {
     if (res.isConnected && useAuthStore().isLoggedIn) void useOutboxStore().flush()
   })
+  // 点系统通知进 App 的分流监听只在这里注册一次：它只是加监听，跟会话有没有、
+  // 登录成没成都无关，放进 bootstrap 的 then 里等于没登进来的人永远点不开通知。
+  startPushClickHandler()
   // 冷启动静默登录要等出结果才能开始轮询：没有会话的那一趟轮询只会白跑，
   // 而"第一次只记底不弹"这条规矩一旦被它用掉，真登录之后攒下的提醒
   // 就永远弹不出来了。
@@ -29,7 +33,11 @@ onLaunch(() => {
     .bootstrap()
     .then(() => {
       // 登录页进来的人由 applySession 接手轮询，这里只管"静默登录真的换回了会话"。
-      if (useAuthStore().isLoggedIn) startDueWatch()
+      if (!useAuthStore().isLoggedIn) return
+      startDueWatch()
+      // 静默登录这条路不经过 applySession，cid 得在这里补报一次，否则重装设备、
+      // 换个账号再回来这些情况下服务端手里一直没有这台设备。同样不 await。
+      void registerPushClient()
     })
 })
 onShow(() => {

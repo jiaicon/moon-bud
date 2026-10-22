@@ -4,6 +4,7 @@ import { ApiRequestError } from '../api/errors'
 import { renewAccessToken, setAccessToken, setRefreshHandler, setSessionExpiredHandler } from '../api/http'
 import { authApi, meApi } from '../api/endpoints'
 import { clearLocalNotifications } from '../notifications/local-notify'
+import { registerPushClient, unregisterPushClient } from '../notifications/push-client'
 import { resetDueWatch, startDueWatch } from '../notifications/due-watch'
 import { applyUnreadBadge, refreshUnreadTabBadge } from '../notifications/tab-badge'
 import { GUEST_LANDING_URL, SESSION_EXPIRED_TOAST } from '../guest/guide'
@@ -203,9 +204,16 @@ export const useAuthStore = defineStore('auth', {
       void refreshUnreadTabBadge()
       // 前台轮询也一样要在这里接手：登录页是直接换到 Tab 页的，App 的 onShow 不会为它响。
       startDueWatch()
+      // 换到新会话就把这台设备的 cid 报上去。不 await：上报失败（个推没起来、
+      // 网络断了）不该把登录卡在这一步，推送收不到总比登不进友好。
+      void registerPushClient()
     },
 
     clearSession() {
+      // 注销这台设备的推送要排在清凭证**之前**：DELETE /devices/push-client 是要鉴权的，
+      // 先清 token 等于必然 401，服务端那行设备记录留在原地——同一台手机上换账号时，
+      // 下一个人会替上一个人收通知。仍然不 await：注销失败不该拦在退出登录前面。
+      void unregisterPushClient()
       setAccessToken(null)
       uni.setStorageSync(REFRESH_TOKEN_KEY, '')
       clearLocalNotifications()

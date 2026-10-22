@@ -1,6 +1,7 @@
 import type {
   AuthResponse,
   ChildDto,
+  DeviceDto,
   EventDto,
   FamilyDto,
   FamilyRole,
@@ -151,6 +152,18 @@ export const notificationsApi = {
   list: (query?: Query) => apiRequest<Paginated<NotificationDto>>('/notifications', { query }),
   markRead: (id: string) => apiRequest<NotificationDto>(`/notifications/${id}/read`, { method: 'POST' }),
   readAll: () => apiRequest<{ updated: number }>('/notifications/read-all', { method: 'POST' }),
+}
+
+/**
+ * 推送设备登记。后端只认 cid 不认人是谁的设备，所以 cid 一旦变（重装、清数据）
+ * 就要重新上报，旧的那行会被后来者接管。
+ */
+export const devicesApi = {
+  register: (clientId: string) =>
+    apiRequest<void>('/devices/push-client', { method: 'POST', data: { clientId, platform: 'android' } }),
+  unregister: (clientId: string) =>
+    apiRequest<void>('/devices/push-client', { method: 'DELETE', data: { clientId } }),
+  list: () => apiRequest<DeviceDto[]>('/devices/push-clients'),
 }
 
 export type { ThemePresetId }

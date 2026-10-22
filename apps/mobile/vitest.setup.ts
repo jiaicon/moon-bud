@@ -13,6 +13,12 @@ const storage = new Map<string, unknown>()
   removeTabBarBadge: () => {},
   showToast: () => {},
   reLaunch: () => {},
+  // 推送：默认保持"H5 上不存在"的样子（getPushClientId 未定义），
+  // 需要 App 分支的用例自己在用例里覆盖成 vi.fn()。
+  getPushClientId: undefined,
+  onPushMessage: () => {},
+  navigateTo: () => {},
+  switchTab: () => {},
   request: () => {
     throw new Error('uni.request is not available in unit tests')
   },

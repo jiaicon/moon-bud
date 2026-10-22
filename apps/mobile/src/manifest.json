@@ -1,8 +1,8 @@
 {
     "name" : "月芽",
     // DCloud 开发者中心为该账号申请的 appid（不是密钥，但它决定云打包产出的是哪个包）。
-    // 换账号的人要在 HBuilderX 里双击本文件的"基础配置"→appid 右侧"重新获取"，
-    // 带着占位符 __UNI__MOONBUD 提交云打包会被直接拒绝（见 BUILD.md 第 2 节）。
+    // 已经用它打出过真机 APK，也和 uni-push 后台绑定：换账号要在 HBuilderX 里双击本文件的
+    // "基础配置"→appid 右侧"重新获取"，但那会让个推侧的 cid 全部失效（见 BUILD.md 第 2 节）。
     "appid" : "__UNI__9B2D760",
     "description" : "一家人一起记，孩子的一天看得见",
     "versionName" : "1.0.0",
@@ -21,20 +21,22 @@
         },
         /* 模块配置 */
         "modules" : {
-            // 本地通知（plus.push.createMessage / clear）由 push 模块提供。
+            // 本地通知（plus.push.createMessage / clear）和 uni-push 都由 push 模块提供。
             // 没勾它，真机上每次排期都会抛"打包时未添加push模块"（客户端已把这句吞成一条日志，
             // 但提醒就只剩站内提醒中心和应用内到点提示了）。
-            // 只声明模块、不配 sdkConfigs.push.unipush：我们要的是本机定时通知，
-            // 不接个推/厂商通道，省掉 uni-push 后台开通那一堆配置。
             "Push" : {}
         },
         /* 应用发布信息 */
         "distribute" : {
             /* android打包配置 */
             "android" : {
-                // 局域网调试走的是明文 HTTP：不设这个，真机上每个请求都会失败，
-                // 而报错只会是"网络异常"，看不出原因。
-                "usesCleartextTraffic" : true,
+                // 包名与签名证书、appid 三者一起被推送/商店后台绑定，注册过就不能再改：
+                // 改了个推侧所有 cid 失效、厂商后台要全部重填，且新包覆盖不了老用户的安装。
+                "packagename" : "top.iconmen.yueya",
+                // API 已经只走 https://yueya.iconmen.top，明文通道留着等于给中间人一个机会：
+                // 打包出去的 APK 里任何一条 http 请求都可能被同网段的设备看到并改写。
+                // 真要拿局域网 http 地址调试真机，临时改回 true，别把它带进发布包。
+                "usesCleartextTraffic" : false,
                 "permissions" : [
                     "<uses-permission android:name=\"android.permission.CHANGE_NETWORK_STATE\"/>",
                     "<uses-permission android:name=\"android.permission.MOUNT_UNMOUNT_FILESYSTEMS\"/>",
@@ -60,7 +62,18 @@
                 "dSYMs" : false
             },
             /* SDK配置 */
-            "sdkConfigs" : {},
+            "sdkConfigs" : {
+                "push" : {
+                    "unipush" : {
+                        "version" : "2",
+                        // false = 只走个推自有长连接：App 被划掉就收不到任何推送。
+                        // 小米厂商通道要等商店上架 + 开通推送 + 私信分类审批下来才可能用，
+                        // 那时把这三项凭证填进 DCloud 后台并把这里改成 true，再重新云打包。
+                        // 在那之前改 true 只会让云打包报"厂商配置缺失"。
+                        "offline" : false
+                    }
+                }
+            },
             "icons" : {
                 "android" : {
                     "hdpi" : "unpackage/res/icons/72x72.png",

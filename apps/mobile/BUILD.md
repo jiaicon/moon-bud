@@ -93,13 +93,22 @@ IP 怎么查：Windows `ipconfig`（无线局域网适配器 WLAN 的 IPv4 地�
 <E:\software\HBuilderX>\cli.exe project open --path D:\mine\moonBud\apps\mobile
 <E:\software\HBuilderX>\cli.exe project list          # 应能看到 mobile(UniApp_VUE)
 
-# 每次打包
+# 每次打包（自有证书）
 cli.exe pack --project D:\mine\moonBud\apps\mobile --platform android \
-  --android.packagename com.moonbud.app --android.androidpacktype 1 --ignoreWarnings true
+  --android.packagename top.iconmen.yueya --android.androidpacktype 0 \
+  --android.certfile C:\Users\jiaic\moonbud-keystore\yueya-jks.keystore \
+  --android.certalias yueya \
+  --android.certpassword <见同目录 keystore.password> --android.storepassword <同上> \
+  --ignoreWarnings true
 ```
 
 `--android.androidpacktype` 取值：0 自有证书、1 DCloud 公共证书、2 DCloud 老版证书、3 云端证书。
-先用 1 跑通，正式上架再换 0。产物（APK 下载链接）出现在 HBuilderX 的下拉列表里，
+2026-10-21 之前用的是 3（云端证书，缓存落在 `apps/mobile/dist/cache/cloudcertificate/package.keystore`），
+现在起固定用 0。**签名一旦用于注册推送或上架就不能再换**：换签名后新 APK 覆盖不了已装的旧包，
+必须先卸载重装，厂商后台里登记的 SHA256 指纹也全部要重填。
+证书在仓库外的 `C:\Users\jiaic\moonbud-keystore\`（不进 git；丢了这个目录就等于永久失去
+给老用户覆盖更新的能力，务必备份到网盘/移动硬盘各一份）。
+产物（APK 下载链接）出现在 HBuilderX 的下拉列表里，
 `cli.exe logcat pack` 能看打包控制台日志，`cli.exe pack status --project <路径>` 能看任务状态。
 
 两个只有 GUI 能做的准备，顺序不能反：
@@ -207,3 +216,56 @@ pnpm --filter @moonbud/mobile build:h5    # 生产构建
 `build:h5` 的产物在 `apps/mobile/dist/build/h5`，用任意静态服务器打开即可跑完整的游客流程
 （未登录直接进四个 Tab 页 → 空状态里的引导 → 功能教学 → 主题切换 → 注册/登录）。这是本仓库能给出的**最终**验证，
 但它验证的是"代码正确"，不是"APP 可用" —— 后者只有第 2 节走通才算数。
+
+---
+
+## 7. 厂商通道待办（小米：划掉 App 也收得到）
+
+代码侧已经全部就绪（设备 cid 上报、个推 REST 下发、找回密码走推送）。下面五步没有一步是写代码，
+全部是提交材料/点后台，**归用户**；A 与 B 可以并行提交。设计依据见
+`docs/superpowers/specs/2026-10-21-push-notifications-design.md` 第 2、4 节。
+
+| 步 | 做什么 | 产出 | 依赖 | 周期 | 费用 |
+|---|---|---|---|---|---|
+| A | 软著登记（中国版权保护中心，个人实名）。源代码前后各 30 页 + 说明文档**由我准备**，提交动作归你 | 登记证书 | — | 自办 30–60 工作日；代办加急 3–20 天 | 自办 0 官费 |
+| B | App 备案（腾讯云，在与 ICP 同主体下新增一项 App） | App 备案号 | 包名 + 签名 MD5 + 服务器接入信息（见下） | 约 1–2 周 | 0 |
+| C | 小米开发者账号（个人实名）→ 创建应用 → **非公开上架** → 开通推送 | 小米 AppId / AppAppKey / AppSecret | A + B 的证书 | 商店审核 1–3 天 | 0 |
+| D | 小米推送运营平台申请**私信/服务类**分类 + 消息模板 | 通过的 category/channel id + 模板 id | C | 3–10 天 | 0 |
+| E | DCloud 开发者中心 → uni-push 2.0 → 厂商推送设置，填 C 的三项；manifest `offline:true`；重新云打包 | 带小米通道的 APK | C | 当天 | 0 |
+
+**为什么必须走这一趟**：`offline:false` 时下发的消息走个推自己的长连接，进程被杀就彻底断——
+"划掉 App 还想收到通知"这个能力只能来自系统级厂商通道。而未分类应用的小米默认通道是
+**单应用单设备单日 1 条**，超出的部分个推返回 `exceed quota` 后被静默吞掉（日志里什么都不会变红），
+所以 D 的私信分类不是可选项。2026-07-01 起接入的应用还必须用**模板**下发私信，模板 id 同样在 D 拿到。
+
+**B 要填的两项身份**（签名证书固定在 `C:\Users\jiaic\moonbud-keystore`，不能再换）：
+
+```
+包名        top.iconmen.yueya
+签名 MD5    49:DB:D5:E6:05:18:8F:36:82:4A:86:A4:9F:60:B6:7E
+```
+
+**服务器凭证**（值由用户填，**别贴到聊天里**）：`/home/workspace/moon-bud/.env`，chmod 600，
+需要 `GETUI_APPID` / `GETUI_APPKEY` / `GETUI_MASTER_SECRET`；三个都非空才启用个推通道，
+缺任意一个则退回"只写日志、不推送"（启动日志会说明当前是哪一种）。
+可选：`XIAOMI_PUSH_CATEGORY`（D 批下来的分类，留空则不下发 category 字段）、
+`PUSH_REMINDER_DUE`（默认 `false`，含义见第 8 节）。
+
+---
+
+## 8. 真机 spike：三个问题（先于任何"推送上线"的判断）
+
+APK：`__UNI__9B2D760__20261021170135.apk`（已验签名 `0A:C3:D2…`、包名、个推 SDK 在包内）。
+临时把测试代码写进页面里跑，结论记下来，**测试代码不进仓库**。
+
+1. **cid 能不能拿到**：`uni.getPushClientId()` 在自有证书包上返回什么（`showModal` 打出来）。
+   拿不到 cid，后面所有推送都是空谈。
+2. **个推自有通道到底能不能弹**：手工 `POST /auth` + `POST /push/single/cid`（curl），
+   在前台 / 后台 / 划掉三种状态下各试一次。
+3. **MIUI 划掉 App 后本地定时还弹不弹**：设一条 2 分钟后的本地提醒 → 划掉 App → 看是否亮屏。
+   **未做自启动/省电设置**和**做完之后**各测一次。
+
+第 3 条决定 `PUSH_REMINDER_DUE` 的默认值对不对：设计假设到点提醒由设备本地定时负责（第 3 节），
+服务端推送只管"别人需要你处理"这一类。若 spike 表明本地定时在划掉后不弹而推送能弹，就把默认值改成
+`true`，并另外设计本地排程与推送的互斥开关（否则同一条提醒会弹两次）；其余代码不用动。
+

@@ -984,3 +984,22 @@ Android 侧要重出包才带得上这一轮（HBuilderX 发行 → 原生 App-�
 - **`u-subsection` 在 H5 里对合成 `el.click()` 无反应**：要 `pointerdown/mousedown/pointerup/mouseup/click`
   整串才挪高亮（见「踩过的坑」）。所以"分段可点"这类结论只由真序列支撑，别拿 `.click()` 的负结果当证据。
 
+
+### 本轮（十九）推送通道：明确留下的
+
+- **`PUSH_REMINDER_DUE` 的默认值是个假设，不是结论**：现在默认 `false` —— 到点提醒由设备本地定时
+  （`plus.push.createMessage(when)`）负责，服务端对带 `data.occurrenceId` 的一条推送都不发。
+  依据是"MIUI 允许自启动 + 省电无限制时，本地定时在 App 被划掉后仍能弹"。**这条还没在真机验证过**
+  （BUILD.md 第 8 节 spike 第 3 问）。若验证结果相反（划掉后不弹，而推送能弹），把默认值改成 `true`，
+  并**另外设计本地排程与推送的互斥开关**——两边都开会让同一条提醒弹两次。改默认值不需要动 provider 代码，
+  门控测试（`getui-push.provider.e2e-spec.ts` 契约 1）钉的是行为，不是值。
+- **个推鉴权失效的具体码值仍未确认，但已不承重**：终审指出"只按 401/`AUTH` 字样判断"会让一张过期 token
+  永远用下去（进程不重启就永久停发，日志只说"推送失败"）。现在改成**任何失败都丢 token、重取、再发一次**，
+  第二次仍失败才 warn。真凭证到位后仍要看一眼实际码族，用来判断"这次失败到底是不是鉴权"，但不再影响能不能自愈。
+- **入家申请审批目前不产生通知，因此也没有推送**：`join requests` 那一路只写库、没人被通知去看，
+  管理员只能自己进成员页才发现有人在等。这是既有缺口，本轮没有补（补它就是再加一处
+  `notification.create` + `push.send`，形态和找回密码那条一样）。
+- **服务器 `.env` 的键还没填值**：`GETUI_APPID` / `GETUI_APPKEY` / `GETUI_MASTER_SECRET` /
+  `XIAOMI_PUSH_CATEGORY` / `PUSH_REMINDER_DUE` 已写进本地 `.env`、`.env.example` 和
+  `deploy/compose.prod.yml` 的透传列表（空值不会让容器起不来）。**值归用户**，写在服务器上
+  `/home/workspace/moon-bud/.env`（chmod 600），别贴到聊天里。

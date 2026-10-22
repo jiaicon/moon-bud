@@ -184,11 +184,19 @@ cmd /c rmdir "D:\mine\moonBud\apps\mobile\node_modules\@dcloudio"
   表现是"躺下拉面板、不弹横幅、不响、不震"；把它在系统设置里调到最高档，横幅/铃声/震动全有了
   （`mImportance=4`、`mUserLockedFields=34` 就是那次手动调高的痕迹）。
   代码侧 `push-channel.ts` 在冷启动时用 `uni.getChannelManager().setPushChannel()` 把
-  **这条同名渠道**按 `IMPORTANCE_HIGH + 震动 + 锁屏可见` 抢先建好 ——
+  **这条同名渠道**按 `IMPORTANCE_HIGH + 震动` 抢先建好 ——
   **id 必须是 `DcloudChannelID`**：自创一个 id 只会多建一条没人往里投通知的渠道，设置里多一格、
   响法一点没变。安卓只承认"建渠道那一刻"设的重要度，事后 App 改不动，所以这一句必须赶在第一条
-  通知弹出来之前跑到。**新装用户是否真的默认就响，要靠卸载重装验证**（这台测试机的旧渠道已被
-  手动调高，验不出代码的功劳）。
+  通知弹出来之前跑到。
+- **这一句到底落了什么：`adb shell pm clear` 后首启，dumpsys 显示 `mOriginalImp=4`、
+  `mName=到点提醒`、`mVibrationEnabled=true`、`mUserLockedFields=0`** —— 重要度/渠道名/震动都是
+  代码建的（不是用户调的，`mUserLockedFields=0` 就是没人动过的痕迹）。**但 `lockscreenVisibility`
+  没落地**（实测仍 `-1000`=PRIVATE），所以那个字段已从代码里删掉，别再传。
+  未测：横幅是否真的在新装默认档下弹出（清数据会登出，需重新登录拿到新 cid 再打一枪）。
+- **装了带新代码的 APK 后 dumpsys 里渠道一点没变，不是代码没跑**：安卓对已经存在的渠道 id 会
+  忽略 `createNotificationChannel`，重要度/名字都改不动（这也是"先建为敬"必须抢在 SDK 之前的原因）。
+  排查顺序：先 `unzip -p <apk> assets/app-service.js | grep -c DcloudChannelID` 证明代码真在包里，
+  再用 `pm clear` 或卸载重装重测。
 - Android 13+ 首次需要授予通知权限，`manifest.json` 里已声明 `POST_NOTIFICATIONS`。
 
 ---
@@ -345,7 +353,7 @@ Nest 侧判成功的条件是 `res.ok && code === 0`，所以这两种都会走 
 
 ---
 
-## 8. 真机 spike：六问六答（2026-10-22 跑完，结论已进代码）
+## 8. 真机 spike：七问七答（2026-10-22 跑完，结论已进代码）
 
 包：`__UNI__9B2D760__20261022132349.apk` 起（含 `manifest.json` 的 unipush 收口、自有证书）。
 临时探针写在页面里跑，测完删掉，**测试代码不进仓库**。
@@ -370,7 +378,7 @@ Nest 侧判成功的条件是 `res.ok && code === 0`，所以这两种都会走 
 的话）。于是：`PUSH_REMINDER_DUE` 默认改 `true`（生产服务器已打开），到点提醒由服务端发；
 客户端 `registerPushClient` 报上 cid 就关本地排期，报不上才兜底（第 3 节）。
 
-**后面又补了两测（同日，包 `20261022155` 之后）**：
+**后面又补了几测（同日，包 `20261022155` 之后）**：
 
 5. **App 在后台（按 Home，不划掉）收得到吗** —— **收得到**。省电策略"无限制"下，同一枪在后台
    打照样回 `successed_online`。之前"后台收不到、回前台才收到"的那次，是没调到该策略 +
@@ -380,3 +388,8 @@ Nest 侧判成功的条件是 `res.ok && code === 0`，所以这两种都会走 
    横幅、铃声、震动一起有（当时是你在设置里手动调的，代码还没生效）。代码侧改成冷启动就
    `setPushChannel` **按同一个 id** 把这条渠道建成最高档（`push-channel.ts`）—— 自创 id 只会多建
    一条没人投通知的渠道；而安卓只承认建渠道时设的重要度，所以必须抢在建之前。
+7. **清数据重装后，代码建的渠道到底落了什么** —— `adb shell pm clear top.iconmen.yueya` + 首启，
+   `dumpsys notification --noredact` 里 `DcloudChannelID` 变成 `mOriginalImp=4`（代码建的，不是用户调的）、
+   `mName=到点提醒`、`mVibrationEnabled=true`、`mUserLockedFields=0`。**importance/渠道名/震动都落地了。**
+   没落地的只有 `lockscreenVisibility`（仍 `-1000`=PRIVATE），这个字段已从 `push-channel.ts` 删掉。
+   仍然没测：新装默认档下横幅是否真的弹出（清数据把会话也清了，要重新登录拿到新 cid 再打一枪）。

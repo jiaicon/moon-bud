@@ -10,8 +10,6 @@ export const PUSH_CHANNEL_ID = 'DcloudChannelID'
 
 /** 4 = IMPORTANCE_HIGH：弹横幅、响系统提示音、按渠道默认震动。 */
 const IMPORTANCE_HIGH = 4
-/** 1 = VISIBILITY_PUBLIC：锁屏上也看得见内容（夜奶提醒常常就是锁屏那一刻要读）。 */
-const VISIBILITY_PUBLIC = 1
 
 interface ChannelManagerLike {
   setPushChannel?: (options: Record<string, unknown>) => void
@@ -44,13 +42,13 @@ export function configurePushChannel(): void {
 
   try {
     // 不传 soundName：那要求 APK 的 res/raw 里真有那个音频文件，缺了整套渠道就建不起来；
-    // 用系统默认铃音就够响。
+    // 用系统默认铃音就够响。lockscreenVisibility 传了也没用 —— 清数据重装后 dumpsys 实测
+    // 仍是 -1000（PRIVATE），这个 API 没落地它，留在代码里只会让人以为锁屏可见性由它管。
     manager.setPushChannel({
       channelId: PUSH_CHANNEL_ID,
       channelDesc: '到点提醒',
       importance: IMPORTANCE_HIGH,
       enableVibration: true,
-      lockscreenVisibility: VISIBILITY_PUBLIC,
     })
   } catch (err) {
     // 提醒照样会进通知栏，只是可能不弹横幅，不值得为它打断启动。

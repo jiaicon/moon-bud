@@ -996,11 +996,14 @@ Android 侧要重出包才带得上这一轮（HBuilderX 发行 → 原生 App-�
   **同日追加两测**：省电策略"无限制"下 App **退后台（不划掉）收得到**，个推照样回 `successed_online`；
   而"通知很轻"的原因是**安卓 8+ 的通知渠道重要度** —— SDK 自建渠道是默认档（只躺下拉面板），
   手动把那个渠道调到最高档就有横幅+铃声+震动。代码侧 `push-channel.ts` 冷启动用
-  `uni.getChannelManager().setPushChannel()` 抢先把渠道建成 `IMPORTANCE_HIGH + 震动 + 锁屏可见`
+  `uni.getChannelManager().setPushChannel()` 抢先把渠道建成 `IMPORTANCE_HIGH + 震动`
   （安卓只承认建渠道时设的重要度，事后 App 改不动）。**id 必须是 dumpsys 实测的那条
   `DcloudChannelID`** —— 自创 id 只会多建一条没人往里投通知的渠道，设置里多一格、响法没变。
-  **仍然没测的**：① 划掉 App 之后能不能重新收到推送（要厂商通道，那条要上架）；② **卸载重装后
-  新装用户是否默认就响** —— 这台测试机的旧渠道已被手动调高，验不出 `setPushChannel` 的功劳；
+  **`pm clear` 后首启实测（等价新装）**：`mOriginalImp=4` + `mName=到点提醒` + `mVibrationEnabled=true`
+  + `mUserLockedFields=0`，重要度/渠道名/震动确由代码建出；只有 `lockscreenVisibility` 被这 API
+  忽略（仍 PRIVATE），字段已删。
+  **仍然没测的**：① 划掉 App 之后能不能重新收到推送（要厂商通道，那条要上架）；② 新装默认档下
+  **横幅是否真的弹出** —— 渠道建对了不等于看得见，清数据把会话也清了，要重新登录拿到新 cid 再打一枪；
   ③ `settings.ttl` 的单位（离线一小时内拉起能否补发）。
 - **服务端通道在 2026-10-22 换过一次：个推 REST 直连 → 我们的 uniCloud 云函数**，因为 uni-push 2.0
   官方禁止第三方服务端直连个推 api，2.0 应用也拿不到 MasterSecret（详见 BUILD.md 第 7 节）。

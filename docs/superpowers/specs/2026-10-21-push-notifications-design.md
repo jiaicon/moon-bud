@@ -219,9 +219,12 @@ PUSH_REMINDER_DUE=true
    **`DcloudChannelID`**（`mOriginalImp=3` = 建的时候是默认档），表现就是"下拉面板躺一条、不弹不响不震"；
    把该渠道调到最高档，三种反馈一起出现。代码侧的对策是 `push-channel.ts`：冷启动就用
    `uni.getChannelManager().setPushChannel()`（平铺在 `uni` 上，**没有 `uni.push` 这个命名空间**）
-   把**同一个 id** 建成 `importance:4 + 震动 + 锁屏可见` —— 安卓只承认建渠道那一刻设的重要度，
+   把**同一个 id** 建成 `importance:4 + 震动` —— 安卓只承认建渠道那一刻设的重要度，
    App 事后改不动；而自创一个新 id 只会多建一条没人往里投通知的渠道。
-   **未验**：卸载重装后新设备是否默认就响（这台机的旧渠道已被手动调高，验不出代码的功劳）。
+   **已验（`pm clear` 后首启，等价于新装）**：`mOriginalImp=4`、`mName=到点提醒`、
+   `mVibrationEnabled=true`、`mUserLockedFields=0` —— 重要度/渠道名/震动确由代码建出，没人手动调过。
+   `lockscreenVisibility` **不落地**（仍 `-1000`=PRIVATE），该字段已从代码删除。
+   **未验**：新装默认档下横幅是否真的弹出 —— 清数据会连会话一起清掉，要重新登录拿到新 cid 再打一枪。
 
 ## 7. 测试
 

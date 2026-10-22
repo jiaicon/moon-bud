@@ -22,7 +22,7 @@ describe('推送通知渠道', () => {
     stubManager(undefined)
   })
 
-  it('把渠道设成最高档：弹横幅、响铃、震动、锁屏也看得见', () => {
+  it('把渠道设成最高档：弹横幅、响铃、震动', () => {
     const setPushChannel = vi.fn()
     stubManager({ setPushChannel })
 
@@ -36,7 +36,6 @@ describe('推送通知渠道', () => {
       channelDesc: '到点提醒',
       importance: 4,
       enableVibration: true,
-      lockscreenVisibility: 1,
     })
   })
 

@@ -3,6 +3,7 @@ import { onHide, onLaunch, onShow } from '@dcloudio/uni-app'
 import { rearmLocalNotifications } from './notifications/local-notify'
 import { resyncActiveReminderSchedules } from './notifications/reminder-arming'
 import { startDueWatch, stopDueWatch } from './notifications/due-watch'
+import { configurePushChannel } from './notifications/push-channel'
 import { registerPushClient, startPushClickHandler } from './notifications/push-client'
 import { refreshUnreadTabBadge } from './notifications/tab-badge'
 import { useAuthStore } from './stores/auth'
@@ -23,6 +24,9 @@ onLaunch(() => {
   uni.onNetworkStatusChange((res) => {
     if (res.isConnected && useAuthStore().isLoggedIn) void useOutboxStore().flush()
   })
+  // 通知渠道必须赶在第一条通知弹出来之前按最高档建好：安卓不允许 App 事后改已建渠道的
+  // 重要度，先到先得。不建就只能是 SDK 那个默认档——实测"躺下拉面板、不弹不响不震"。
+  configurePushChannel()
   // 点系统通知进 App 的分流监听只在这里注册一次：它只是加监听，跟会话有没有、
   // 登录成没成都无关，放进 bootstrap 的 then 里等于没登进来的人永远点不开通知。
   startPushClickHandler()

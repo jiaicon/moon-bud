@@ -33,31 +33,58 @@ export const SCHEDULE_KEY = 'localNotifications'
 let warnedUnsupported = false
 // #endif
 
+/**
+ * 本地排期只是兜底，默认关。
+ *
+ * plus 的定时消息一旦排上就**撤不掉**：官方《Push 推送开发指南》写的是 `clear()` 清空
+ * "系统通知栏中属于当前应用的所有消息"，还没到点、压在队列里的那条它碰不到 —— 真机验过，
+ * 停掉提醒之后旧时刻照响。而服务端推送是到点那一刻才决定发不发，停掉/改时间天然作废。
+ * 所以这台设备上报到了 cid（推送通道可用）就不要再排本地，否则"我叫它别再响了"做不到。
+ */
+let localPushEnabled = false
+
+export function setLocalPushEnabled(enabled: boolean): void {
+  if (enabled === localPushEnabled) return
+  localPushEnabled = enabled
+  // 开启的那一刻把表里已有的排期补交给原生。关掉时不做反悔动作：反悔不掉，
+  // 而那些消息跟着进程一起没，不会漂到下一次启动。
+  if (enabled) rescheduleAll(readScheduled())
+}
+
 function readScheduled(): Record<string, ScheduledRow> {
   const stored = uni.getStorageSync(SCHEDULE_KEY)
   return stored && typeof stored === 'object' ? (stored as Record<string, ScheduledRow>) : {}
 }
 
-/**
- * plus 只有"清空全部本地排期"，没有"按 id 撤销一条"。
- * 因此每次改动都清空后按登记表重建 —— 否则撤销一个提醒会顺手抹掉全家其它提醒的推送。
- */
+/** 登记表是唯一的事实，每次改动都整份重写后再按它重建原生排期。 */
 function rescheduleAll(scheduled: Record<string, ScheduledRow>): void {
   uni.setStorageSync(SCHEDULE_KEY, scheduled)
   // #ifdef APP-PLUS
+  if (!localPushEnabled) return
   try {
     plus.push.clear()
     for (const record of Object.values(scheduled)) {
       if (record.at <= Date.now()) continue
       plus.push.createMessage(record.body, JSON.stringify({ id: record.owner }), {
         title: record.title,
-        when: new Date(record.at),
+        delay: delaySeconds(record.at),
       })
     }
   } catch (e) {
     warnNativePushUnavailable(e)
   }
   // #endif
+}
+
+/**
+ * 推迟显示靠的是 `delay`（秒），不是 `when`：文档里 `when` 只是"消息上显示的提示时间"，
+ * 真机对照下带 `when` 的两条（plus 与 uni 各一）都在提交的那一刻就冒了出来，带 `delay`
+ * 的两条才各自在 +120s / +180s 响 —— 这就是"保存即弹、到点不响"。
+ *
+ * 向上取整：宁可晚一秒，不要在点之前响。
+ */
+function delaySeconds(at: number): number {
+  return Math.max(1, Math.ceil((at - Date.now()) / 1000))
 }
 
 function clearNativePush(): void {

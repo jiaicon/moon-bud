@@ -987,12 +987,20 @@ Android 侧要重出包才带得上这一轮（HBuilderX 发行 → 原生 App-�
 
 ### 本轮（十九）推送通道：明确留下的
 
-- **`PUSH_REMINDER_DUE` 的默认值是个假设，不是结论**：现在默认 `false` —— 到点提醒由设备本地定时
-  （`plus.push.createMessage(when)`）负责，服务端对带 `data.occurrenceId` 的一条推送都不发。
-  依据是"MIUI 允许自启动 + 省电无限制时，本地定时在 App 被划掉后仍能弹"。**这条还没在真机验证过**
-  （BUILD.md 第 8 节 spike 第 3 问）。若验证结果相反（划掉后不弹，而推送能弹），把默认值改成 `true`，
-  并**另外设计本地排程与推送的互斥开关**——两边都开会让同一条提醒弹两次。改默认值不需要动 provider 代码，
-  门控测试（`unicloud-push.provider.e2e-spec.ts` 契约 1）钉的是行为，不是值。
+- **`PUSH_REMINDER_DUE` 的默认值已经证伪并改判（2026-10-22 真机）**：原来默认 `false`，依据是
+  "本地定时更抗杀"这条**没验证过**的假设。真机四问答复（BUILD.md 第 8 节）：`plus.push.clear()`
+  撤不掉还没到点的定时消息（"停掉提醒"之后旧时刻照响），且划掉 App 后整个排期不响、重开不补。
+  于是默认改成 `true`（生产服务器已打开），到点提醒由服务端发；互斥开关做成自动 ——
+  `registerPushClient` 把 cid 报进服务端成功就 `setLocalPushEnabled(false)`，报不上才留本地兜底。
+  provider 的门控测试（`unicloud-push.provider.e2e-spec.ts` 契约 1）钉的是行为，不受默认值影响。
+  **同日追加两测**：省电策略"无限制"下 App **退后台（不划掉）收得到**，个推照样回 `successed_online`；
+  而"通知很轻"的原因是**安卓 8+ 的通知渠道重要度** —— SDK 自建渠道是默认档（只躺下拉面板），
+  手动把那个渠道调到最高档就有横幅+铃声+震动。代码侧 `push-channel.ts` 冷启动用
+  `uni.getChannelManager().setPushChannel()` 抢先把渠道建成 `IMPORTANCE_HIGH + 震动 + 锁屏可见`
+  （安卓只承认建渠道时设的重要度，事后 App 改不动）。
+  **仍然没测的**：① 划掉 App 之后能不能重新收到推送（要厂商通道，那条要上架）；② **卸载重装后
+  新装用户是否默认就响** —— 这台测试机的旧渠道已被手动调高，验不出 `setPushChannel` 的功劳；
+  ③ `settings.ttl` 的单位（离线一小时内拉起能否补发）。
 - **服务端通道在 2026-10-22 换过一次：个推 REST 直连 → 我们的 uniCloud 云函数**，因为 uni-push 2.0
   官方禁止第三方服务端直连个推 api，2.0 应用也拿不到 MasterSecret（详见 BUILD.md 第 7 节）。
   随之作废的假设不用再管：个推 `/auth` 的鉴权失效码族、token 缓存自愈那套，实现已经整体删掉了。

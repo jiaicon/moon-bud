@@ -1,17 +1,19 @@
 import { devicesApi } from '../api/endpoints'
 import { useFamilyStore } from '../stores/family'
+import { setLocalPushEnabled } from './local-notify'
 import { notificationTarget } from './routing'
 
 /** 退出登录时要用它发 DELETE，所以上报成功必须把 cid 留在本地。 */
 export const CLIENT_ID_KEY = 'pushClientId'
 
 /**
- * uni-push 2.0 的这两个客户端接口不在 @dcloudio/types 里（和 uni.request 的
- * 'PATCH' 一样的缺口），只声明本文件真正用到的部分，不写成 any。
+ * 只声明本文件真正用到的部分，不写成 any。字段名以 @dcloudio/types 的
+ * `GetPushClientIdSuccessData` 为准：成功回调给的是 `{ cid, errMsg }`，不是 `client_id`
+ * ——真机上 success 一直正常，读错键让服务端一条设备记录都没收到过。
  */
 interface PushClientApi {
   getPushClientId?: (options: {
-    success?: (res: { client_id?: string }) => void
+    success?: (res: { cid?: string }) => void
     fail?: (err: unknown) => void
   }) => void
   onPushMessage?: (callback: (message: PushMessage) => void) => void
@@ -36,13 +38,23 @@ function pushApi(): PushClientApi {
 function requestClientId(): Promise<string | null> {
   return new Promise((resolve) => {
     pushApi().getPushClientId?.({
-      success: (res) => resolve(res.client_id || null),
+      success: (res) => resolve(res.cid || null),
       fail: () => resolve(null),
     })
   })
 }
 
+/**
+ * cid 有没有报进服务端，决定这台设备的到点提醒由谁负责：报上了就走服务端推送（停掉、
+ * 改时间的那一刻就不发了）；报不上只剩本地排期能响 —— 而本地消息排上就撤不掉。
+ */
 export async function registerPushClient(): Promise<string | null> {
+  const clientId = await reportClientId()
+  setLocalPushEnabled(clientId === null)
+  return clientId
+}
+
+async function reportClientId(): Promise<string | null> {
   if (typeof pushApi().getPushClientId !== 'function') {
     // H5 上这是常态，不是故障，所以不刷警告：控制台里每条 warn 都得当作值得看的东西。
     return null

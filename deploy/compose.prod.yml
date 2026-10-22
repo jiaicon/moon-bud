@@ -52,13 +52,11 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-2h}
       JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-30d}
-      # 以下五项均可留空。留空 = 不启用推送：api 起来后走 NoopPushProvider，
-      # 只写日志、App 关闭时收不到通知（凭证齐了才会换成个推）。
+      # 以下三项均可留空。留空 = 不启用推送：api 起来后走 NoopPushProvider，
+      # 只写日志、App 关闭时收不到通知（地址与共享密钥齐了才会换成云函数通道）。
       # 这里是本文件第一处 `${VAR:-}` 透传：密钥仍只在仓库根 .env，进镜像的只有变量名。
-      GETUI_APPID: ${GETUI_APPID:-}
-      GETUI_APPKEY: ${GETUI_APPKEY:-}
-      GETUI_MASTER_SECRET: ${GETUI_MASTER_SECRET:-}
-      XIAOMI_PUSH_CATEGORY: ${XIAOMI_PUSH_CATEGORY:-}
+      UNICLOUD_PUSH_URL: ${UNICLOUD_PUSH_URL:-}
+      UNICLOUD_PUSH_TOKEN: ${UNICLOUD_PUSH_TOKEN:-}
       PUSH_REMINDER_DUE: ${PUSH_REMINDER_DUE:-false}
       # 提醒扫描的 cron 每分钟一次；显式写出，免得以后有人以为它是默认关的。
       SCHEDULER_ENABLED: 'true'

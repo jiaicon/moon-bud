@@ -6,18 +6,11 @@ import { NoopPushProvider } from '../src/push/noop-push.provider'
 import { PUSH_PROVIDER } from '../src/push/push-provider.interface'
 import { PushModule } from '../src/push/push.module'
 
-const PUSH_KEYS = [
-  'GETUI_APPID',
-  'GETUI_APPKEY',
-  'GETUI_MASTER_SECRET',
-  'XIAOMI_PUSH_CATEGORY',
-  'PUSH_REMINDER_DUE',
-]
+const PUSH_KEYS = ['UNICLOUD_PUSH_URL', 'UNICLOUD_PUSH_TOKEN', 'PUSH_REMINDER_DUE']
 
 const FULL_ENV = {
-  GETUI_APPID: 'AppIDXYZ',
-  GETUI_APPKEY: 'appkey',
-  GETUI_MASTER_SECRET: 'mastersecret',
+  UNICLOUD_PUSH_URL: 'https://example.dev-hz.cloudbase.xyz/push/send',
+  UNICLOUD_PUSH_TOKEN: 'secret',
 }
 
 async function resolveProvider(env: Record<string, string>): Promise<string> {
@@ -58,26 +51,25 @@ describe('推送通道绑定', () => {
     jest.restoreAllMocks()
   })
 
-  it('三件套齐全就用个推', async () => {
-    await expect(resolveProvider({ ...FULL_ENV })).resolves.toBe('GetuiPushProvider')
-    expect(log.mock.calls.flat().join('\n')).toMatch(/推送通道：个推/)
+  it('URL 和密钥都齐了才用云函数通道', async () => {
+    await expect(resolveProvider({ ...FULL_ENV })).resolves.toBe('UnicloudPushProvider')
+    expect(log.mock.calls.flat().join('\n')).toMatch(/推送通道：uniCloud 云函数/)
   })
 
-  it('少一个凭证就退回只写日志，而不是起一半', async () => {
+  it('少一个配置就退回只写日志，而不是起一半', async () => {
     await expect(
-      resolveProvider({ ...FULL_ENV, GETUI_MASTER_SECRET: '' }),
+      resolveProvider({ ...FULL_ENV, UNICLOUD_PUSH_TOKEN: '' }),
     ).resolves.toBe('NoopPushProvider')
   })
 
   it('一个都没配也退回只写日志，并把原因写在启动日志里', async () => {
     await expect(
       resolveProvider({
-        GETUI_APPID: '',
-        GETUI_APPKEY: '',
-        GETUI_MASTER_SECRET: '',
+        UNICLOUD_PUSH_URL: '',
+        UNICLOUD_PUSH_TOKEN: '',
       }),
     ).resolves.toBe('NoopPushProvider')
-    expect(log.mock.calls.flat().join('\n')).toMatch(/推送通道：未配置凭证.*收不到任何通知/s)
+    expect(log.mock.calls.flat().join('\n')).toMatch(/推送通道：未配置.*收不到任何通知/s)
   })
 
   it('没接通通道时也一样：日志里只留长度，不留通知正文', async () => {

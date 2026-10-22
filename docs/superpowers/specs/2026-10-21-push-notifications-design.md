@@ -224,7 +224,8 @@ PUSH_REMINDER_DUE=true
    **已验（`pm clear` 后首启，等价于新装）**：`mOriginalImp=4`、`mName=到点提醒`、
    `mVibrationEnabled=true`、`mUserLockedFields=0` —— 重要度/渠道名/震动确由代码建出，没人手动调过。
    `lockscreenVisibility` **不落地**（仍 `-1000`=PRIVATE），该字段已从代码删除。
-   **未验**：新装默认档下横幅是否真的弹出 —— 清数据会连会话一起清掉，要重新登录拿到新 cid 再打一枪。
+   **新装默认档会响（同日登录后重测）**：拿重装后的全新 cid 连打两枪都 `successed_online`，
+   横幅+响铃+震动三者齐全 —— 家长装上新包不用调任何系统设置。
 
 ## 7. 测试
 

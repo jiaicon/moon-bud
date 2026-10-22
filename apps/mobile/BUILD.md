@@ -192,7 +192,9 @@ cmd /c rmdir "D:\mine\moonBud\apps\mobile\node_modules\@dcloudio"
   `mName=到点提醒`、`mVibrationEnabled=true`、`mUserLockedFields=0`** —— 重要度/渠道名/震动都是
   代码建的（不是用户调的，`mUserLockedFields=0` 就是没人动过的痕迹）。**但 `lockscreenVisibility`
   没落地**（实测仍 `-1000`=PRIVATE），所以那个字段已从代码里删掉，别再传。
-  未测：横幅是否真的在新装默认档下弹出（清数据会登出，需重新登录拿到新 cid 再打一枪）。
+  **而且新装默认档真的会响（同日登录回来拿到新 cid 后两枪实测）**：`successed_online`，横幅、响铃、
+  震动三者齐全 —— 家长装上新包什么都不用调就能被吵到。（旧 cid 那条 `devices` 记录已删，
+  清数据重装后个推发的是全新 cid。）
 - **装了带新代码的 APK 后 dumpsys 里渠道一点没变，不是代码没跑**：安卓对已经存在的渠道 id 会
   忽略 `createNotificationChannel`，重要度/名字都改不动（这也是"先建为敬"必须抢在 SDK 之前的原因）。
   排查顺序：先 `unzip -p <apk> assets/app-service.js | grep -c DcloudChannelID` 证明代码真在包里，
@@ -392,4 +394,5 @@ Nest 侧判成功的条件是 `res.ok && code === 0`，所以这两种都会走 
    `dumpsys notification --noredact` 里 `DcloudChannelID` 变成 `mOriginalImp=4`（代码建的，不是用户调的）、
    `mName=到点提醒`、`mVibrationEnabled=true`、`mUserLockedFields=0`。**importance/渠道名/震动都落地了。**
    没落地的只有 `lockscreenVisibility`（仍 `-1000`=PRIVATE），这个字段已从 `push-channel.ts` 删掉。
-   仍然没测：新装默认档下横幅是否真的弹出（清数据把会话也清了，要重新登录拿到新 cid 再打一枪）。
+   **横幅也确实弹了**：登录回来（个推发的是全新 cid，旧的已删）连打两枪都回 `successed_online`，
+   手机上横幅、响铃、震动三者齐全 —— **新装用户什么都不用调就能被吵到**。

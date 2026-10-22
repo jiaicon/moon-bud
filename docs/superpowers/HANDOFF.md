@@ -1001,10 +1001,11 @@ Android 侧要重出包才带得上这一轮（HBuilderX 发行 → 原生 App-�
   `DcloudChannelID`** —— 自创 id 只会多建一条没人往里投通知的渠道，设置里多一格、响法没变。
   **`pm clear` 后首启实测（等价新装）**：`mOriginalImp=4` + `mName=到点提醒` + `mVibrationEnabled=true`
   + `mUserLockedFields=0`，重要度/渠道名/震动确由代码建出；只有 `lockscreenVisibility` 被这 API
-  忽略（仍 PRIVATE），字段已删。
-  **仍然没测的**：① 划掉 App 之后能不能重新收到推送（要厂商通道，那条要上架）；② 新装默认档下
-  **横幅是否真的弹出** —— 渠道建对了不等于看得见，清数据把会话也清了，要重新登录拿到新 cid 再打一枪；
-  ③ `settings.ttl` 的单位（离线一小时内拉起能否补发）。
+  忽略（仍 PRIVATE），字段已删。**横幅也真的弹了**：登录回来后用重装后的全新 cid 连打两枪，
+  都回 `successed_online`，横幅+响铃+震动齐全 —— 新装家长不用调任何系统设置。
+  （旧 cid `2c4547e9…` 那条 `devices` 记录已删，重装后个推发的是全新 cid。）
+  **仍然没测的**：① 划掉 App 之后能不能重新收到推送（要厂商通道，那条要上架）；
+  ② `settings.ttl` 的单位（离线一小时内拉起能否补发）。
 - **服务端通道在 2026-10-22 换过一次：个推 REST 直连 → 我们的 uniCloud 云函数**，因为 uni-push 2.0
   官方禁止第三方服务端直连个推 api，2.0 应用也拿不到 MasterSecret（详见 BUILD.md 第 7 节）。
   随之作废的假设不用再管：个推 `/auth` 的鉴权失效码族、token 缓存自愈那套，实现已经整体删掉了。

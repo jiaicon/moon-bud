@@ -150,6 +150,17 @@ export interface NotificationDto {
   createdAt: string
 }
 
+/**
+ * 推送设备。`clientId` 故意不原样回传：它加上服务器里的个推凭证就足以冒充这台设备，
+ * 而"我的"页只需要认出是哪一台。
+ */
+export interface DeviceDto {
+  id: string
+  maskedClientId: string
+  platform: string
+  lastSeenAt: string
+}
+
 export interface InviteDto {
   id: string
   code: string

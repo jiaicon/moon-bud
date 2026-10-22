@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule'
 import { AuthModule } from './auth/auth.module'
 import { JwtAuthGuard } from './auth/jwt-auth.guard'
 import { ChildrenModule } from './children/children.module'
+import { DevicesModule } from './devices/devices.module'
 import { EventsModule } from './events/events.module'
 import { FamiliesModule } from './families/families.module'
 import { HealthModule } from './health/health.module'
@@ -31,6 +32,7 @@ import { RemindersModule } from './reminders/reminders.module'
     ChildrenModule,
     EventsModule,
     RemindersModule,
+    DevicesModule,
     PushModule,
     NotificationsModule,
   ],

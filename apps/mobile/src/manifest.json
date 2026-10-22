@@ -70,7 +70,21 @@
                         // 小米厂商通道要等商店上架 + 开通推送 + 私信分类审批下来才可能用，
                         // 那时把这三项凭证填进 DCloud 后台并把这里改成 true，再重新云打包。
                         // 在那之前改 true 只会让云打包报"厂商配置缺失"。
-                        "offline" : false
+                        "offline" : false,
+                        // 通知内容右侧那个图标（个推文档原话：作为通知展示图标，展示在通知内容右侧）。
+                        // 不配就退回应用图标 —— dumpsys 实测那条通知的 extras 里确实带着
+                        // android.largeIcon=BITMAP，而 APK 内 push.png 与 icon.png 是同一张图。
+                        // 这里整套指向全透明 PNG，等于把它去掉（小米/MIUI 只在设了大图标时画右侧）。
+                        "icons" : {
+                            "push" : {
+                                "ldpi" : "push-icons/transparent-ldpi.png",
+                                "mdpi" : "push-icons/transparent-mdpi.png",
+                                "hdpi" : "push-icons/transparent-hdpi.png",
+                                "xhdpi" : "push-icons/transparent-xhdpi.png",
+                                "xxhdpi" : "push-icons/transparent-xxhdpi.png",
+                                "xxxhdpi" : "push-icons/transparent-xxxhdpi.png"
+                            }
+                        }
                     }
                 }
             },

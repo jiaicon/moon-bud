@@ -143,22 +143,33 @@
 		"selectedColor": "#3F76B0",
 		"backgroundColor": "#FFFFFF",
 		"borderStyle": "black",
+		// 这里的图标是构建期默认值（晨雾蓝·浅色）。原生 tabBar 不会给 PNG 着色，
+		// 换主题时由 ThemeRoot 调 setTabBarItem 换成对应预设烘好的那一份，
+		// 文件名与 src/theme/native-chrome.ts 的 tabBarItemPaths 一致，走散了两边都有测试守着。
 		"list": [
 			{
 				"pagePath": "pages/home/index",
-				"text": "首页"
+				"text": "首页",
+				"iconPath": "static/tabbar/home-idle-mist-blue-light.png",
+				"selectedIconPath": "static/tabbar/home-active-mist-blue-light.png"
 			},
 			{
 				"pagePath": "pages/event-list/index",
-				"text": "记录"
+				"text": "记录",
+				"iconPath": "static/tabbar/record-idle-mist-blue-light.png",
+				"selectedIconPath": "static/tabbar/record-active-mist-blue-light.png"
 			},
 			{
 				"pagePath": "pages/reminder-list/index",
-				"text": "提醒"
+				"text": "提醒",
+				"iconPath": "static/tabbar/reminder-idle-mist-blue-light.png",
+				"selectedIconPath": "static/tabbar/reminder-active-mist-blue-light.png"
 			},
 			{
 				"pagePath": "pages/profile/index",
-				"text": "我的"
+				"text": "我的",
+				"iconPath": "static/tabbar/profile-idle-mist-blue-light.png",
+				"selectedIconPath": "static/tabbar/profile-active-mist-blue-light.png"
 			}
 			// 第 5 格预留：{ "pagePath": "pages/knowledge/index", "text": "育儿" }
 		]

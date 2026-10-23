@@ -1,0 +1,56 @@
+{
+  "note": "生成物，别手改：npx vite-node scripts/dump-tabbar-colors.ts",
+  "size": 81,
+  "presets": {
+    "mist-blue": {
+      "idle": {
+        "light": "#5B6B7A",
+        "dark": "#A2B0BC"
+      },
+      "active": {
+        "light": "#3F76B0",
+        "dark": "#7FA8D9"
+      }
+    },
+    "cream-orange": {
+      "idle": {
+        "light": "#7A6A58",
+        "dark": "#BCAA94"
+      },
+      "active": {
+        "light": "#AD6524",
+        "dark": "#E8A768"
+      }
+    },
+    "mint-green": {
+      "idle": {
+        "light": "#55705F",
+        "dark": "#9DB8AA"
+      },
+      "active": {
+        "light": "#3B8260",
+        "dark": "#6FC79C"
+      }
+    },
+    "dusk-purple": {
+      "idle": {
+        "light": "#6A5D78",
+        "dark": "#B2A6C2"
+      },
+      "active": {
+        "light": "#7B5FA6",
+        "dark": "#A98BD4"
+      }
+    },
+    "peach-pink": {
+      "idle": {
+        "light": "#7A5A63",
+        "dark": "#C6A6B0"
+      },
+      "active": {
+        "light": "#B23A5E",
+        "dark": "#E794AE"
+      }
+    }
+  }
+}

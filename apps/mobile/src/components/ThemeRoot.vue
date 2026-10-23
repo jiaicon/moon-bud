@@ -7,6 +7,8 @@ import { themeVarsStyle } from '../theme/uview-bridge'
 const themeStore = useThemeStore()
 
 const tokens = computed(() => (themeStore.isDark ? themeStore.preset.dark : themeStore.preset.light))
+// 图标文件名里带预设 id：换预设要换图，换明暗也要换图。
+const chromeTheme = computed(() => ({ presetId: themeStore.presetId, dark: themeStore.isDark }))
 
 /**
  * 变量必须绑在这个根节点上，H5 也要：documentElement 那份会被 uView 声明在
@@ -15,8 +17,8 @@ const tokens = computed(() => (themeStore.isDark ? themeStore.preset.dark : them
 const rootStyle = computed(() => themeVarsStyle(tokens.value))
 
 // tabBar / 导航栏是 pages.json 里的构建期常量，主题只能运行时覆盖它们。
-onMounted(() => applyNativeChrome(tokens.value))
-watch(tokens, (next) => applyNativeChrome(next))
+onMounted(() => applyNativeChrome(tokens.value, chromeTheme.value))
+watch([tokens, chromeTheme], () => applyNativeChrome(tokens.value, chromeTheme.value))
 </script>
 
 <template>

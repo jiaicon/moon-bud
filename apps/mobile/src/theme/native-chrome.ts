@@ -1,3 +1,4 @@
+import type { ThemePresetId } from '@moonbud/shared'
 import type { ThemeTokens } from './tokens'
 
 /**
@@ -84,7 +85,31 @@ export function tabBarStyle(
   }
 }
 
-export function applyNativeChrome(tokens: ThemeTokens): void {
+/**
+ * 四格的图标名，顺序必须和 pages.json 的 tabBar.list 一致（setTabBarItem 按 index 认人）。
+ * 图标是 PNG，原生 tabBar 不会给它着色，所以每个预设 × 明暗 × 静息/选中都烘一份。
+ * 静息色也分预设：那本来就是各预设自己的次要色（暖灰、冷灰各不相同），
+ * 共用一套中性灰会让橘主题的标签是暖的、图标是冷的。
+ */
+export const TABBAR_GLYPHS = ['home', 'record', 'reminder', 'profile'] as const
+
+export function tabBarItemPaths(
+  index: number,
+  presetId: ThemePresetId,
+  dark: boolean,
+): { iconPath: string; selectedIconPath: string } {
+  const mode = dark ? 'dark' : 'light'
+  const glyph = TABBAR_GLYPHS[index]
+  return {
+    iconPath: `/static/tabbar/${glyph}-idle-${presetId}-${mode}.png`,
+    selectedIconPath: `/static/tabbar/${glyph}-active-${presetId}-${mode}.png`,
+  }
+}
+
+export function applyNativeChrome(
+  tokens: ThemeTokens,
+  theme: { presetId: ThemePresetId; dark: boolean },
+): void {
   const uniApi = (globalThis as Record<string, any>).uni
   try {
     uniApi?.setNavigationBarColor?.(navigationBarStyle(tokens))
@@ -96,5 +121,17 @@ export function applyNativeChrome(tokens: ThemeTokens): void {
     uniApi?.setTabBarStyle?.({ ...tabBarStyle(tokens), fail: () => {} })
   } catch {
     /* 同上 */
+  }
+  // 逐格换图：某一格抛错（非 tab 页）不能连累其余三格，否则四格里会留下旧主题的图。
+  for (let index = 0; index < TABBAR_GLYPHS.length; index++) {
+    try {
+      uniApi?.setTabBarItem?.({
+        index,
+        ...tabBarItemPaths(index, theme.presetId, theme.dark),
+        fail: () => {},
+      })
+    } catch {
+      /* 同上 */
+    }
   }
 }

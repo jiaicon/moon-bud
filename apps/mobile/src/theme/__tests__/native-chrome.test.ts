@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { applyNativeChrome, ensureContrast, navigationBarStyle, tabBarStyle } from '../native-chrome'
+import {
+  applyNativeChrome,
+  ensureContrast,
+  navigationBarStyle,
+  tabBarStyle,
+  TABBAR_GLYPHS,
+  tabBarItemPaths,
+} from '../native-chrome'
 import { THEME_PRESETS } from '../presets'
 import type { ThemeTokens } from '../tokens'
 
@@ -81,25 +88,68 @@ describe('navigationBarStyle', () => {
 type ChromeUni = {
   setNavigationBarColor: (opts: unknown) => void
   setTabBarStyle: (opts: unknown) => void
+  setTabBarItem: (opts: unknown) => void
 }
 const chromeUni = () => uni as unknown as ChromeUni
 
+describe('tabBarItemPaths', () => {
+  it('四格顺序与 pages.json 的 tabBar.list 一致', () => {
+    expect(TABBAR_GLYPHS).toEqual(['home', 'record', 'reminder', 'profile'])
+  })
+
+  it('静息图与选中图都分主题 —— PNG 不会被原生 tabBar 着色，颜色只能烘进文件', () => {
+    // 静息色用的是各预设自己的次要色（暖灰、冷灰互不相同），跟着预设走才不会和标签打架。
+    expect(tabBarItemPaths(0, 'mist-blue', false).iconPath).toBe(
+      '/static/tabbar/home-idle-mist-blue-light.png',
+    )
+    expect(tabBarItemPaths(0, 'cream-orange', false).iconPath).not.toBe(
+      tabBarItemPaths(0, 'mist-blue', false).iconPath,
+    )
+    expect(tabBarItemPaths(0, 'cream-orange', false).selectedIconPath).toBe(
+      '/static/tabbar/home-active-cream-orange-light.png',
+    )
+    expect(tabBarItemPaths(3, 'peach-pink', true).selectedIconPath).toBe(
+      '/static/tabbar/profile-active-peach-pink-dark.png',
+    )
+  })
+
+  it('App 端 setTabBarItem 要的是包内绝对路径，不能是相对路径', () => {
+    for (let i = 0; i < TABBAR_GLYPHS.length; i++) {
+      const { iconPath, selectedIconPath } = tabBarItemPaths(i, 'mist-blue', false)
+      expect(iconPath.startsWith('/static/')).toBe(true)
+      expect(selectedIconPath.startsWith('/static/')).toBe(true)
+    }
+  })
+})
+
 describe('applyNativeChrome', () => {
-  it('两个原生 API 都按算出来的样式调用', () => {
+  const mistLight = { presetId: 'mist-blue' as const, dark: false }
+
+  it('两个原生 API 都按算出来的样式调用，并给四格换上图', () => {
     const spy = vi.fn()
     const tabSpy = vi.fn()
+    const itemSpy = vi.fn()
     const target = chromeUni()
     const originalNav = target.setNavigationBarColor
     const originalTab = target.setTabBarStyle
+    const originalItem = target.setTabBarItem
     target.setNavigationBarColor = spy
     target.setTabBarStyle = tabSpy
+    target.setTabBarItem = itemSpy
     try {
-      applyNativeChrome(THEME_PRESETS['mist-blue'].dark)
+      applyNativeChrome(THEME_PRESETS['mist-blue'].dark, { presetId: 'mist-blue', dark: true })
       expect(spy).toHaveBeenCalledWith(navigationBarStyle(THEME_PRESETS['mist-blue'].dark))
       expect(tabSpy).toHaveBeenCalledWith({ ...tabBarStyle(THEME_PRESETS['mist-blue'].dark), fail: expect.any(Function) })
+      expect(itemSpy).toHaveBeenCalledTimes(4)
+      expect(itemSpy).toHaveBeenNthCalledWith(2, {
+        index: 1,
+        ...tabBarItemPaths(1, 'mist-blue', true),
+        fail: expect.any(Function),
+      })
     } finally {
       target.setNavigationBarColor = originalNav
       target.setTabBarStyle = originalTab
+      target.setTabBarItem = originalItem
     }
   })
 
@@ -110,9 +160,25 @@ describe('applyNativeChrome', () => {
       throw new Error('not a tabbar page')
     }
     try {
-      expect(() => applyNativeChrome(THEME_PRESETS['mist-blue'].light)).not.toThrow()
+      expect(() => applyNativeChrome(THEME_PRESETS['mist-blue'].light, mistLight)).not.toThrow()
     } finally {
       target.setTabBarStyle = original
+    }
+  })
+
+  it('换图时某一格抛错，其余三格照样换：主题切换不能只换一半', () => {
+    const target = chromeUni()
+    const original = target.setTabBarItem
+    const calls: unknown[] = []
+    target.setTabBarItem = ((opts: unknown) => {
+      calls.push(opts)
+      if ((opts as { index: number }).index === 0) throw new Error('boom')
+    }) as (opts: unknown) => void
+    try {
+      expect(() => applyNativeChrome(THEME_PRESETS['mist-blue'].light, mistLight)).not.toThrow()
+      expect(calls).toHaveLength(4)
+    } finally {
+      target.setTabBarItem = original
     }
   })
 })

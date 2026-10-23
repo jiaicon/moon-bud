@@ -15,6 +15,8 @@ const base = (over: Partial<ReminderDto>): ReminderDto => ({
   rrule: 'FREQ=DAILY;BYHOUR=20;BYMINUTE=00',
   timezone: 'Asia/Shanghai',
   assigneeId: null,
+  eventType: null,
+  actionPayload: null,
   status: 'ACTIVE',
   createdBy: 'u1',
   createdAt: '2026-10-01T00:00:00.000Z',

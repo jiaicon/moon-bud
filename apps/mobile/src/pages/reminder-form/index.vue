@@ -3,8 +3,10 @@ import { computed, reactive, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { blockGuestDeepLink } from '../../guest/deep-link'
 import { NOTE_MAX_LENGTH, type MemberDto } from '@moonbud/shared'
+import { EVENT_TYPES, isEventType, validateEventPayload, type EventType } from '@moonbud/shared'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { membersApi, remindersApi } from '../../api/endpoints'
+import { EVENT_TYPE_META, fieldsFor, type FieldSpec } from '../../events/event-fields'
 import { disarmReminder } from '../../notifications/local-notify'
 import { resyncActiveReminderSchedules } from '../../notifications/reminder-arming'
 import { buildRruleFromUi, parseRruleForUi, RRULE_PRESETS, type RruleKind } from '../../reminders/rrule-presets'
@@ -37,6 +39,20 @@ const everyN = ref('2')
 const weekday = ref(0)
 const childId = ref('')
 const assigneeId = ref('')
+const actionType = ref('')
+/**
+ * 这一格碰过没有。编辑时存好的 payload 会整份回填，可界面只列必填项，
+ * 提交又按界面上这几栏重建 —— 没碰过还照发就会把可选项（如药品"用法"）抹掉，
+ * 所以没碰过就不发动作这两个键，让服务端把原来那份原样留着。
+ */
+const actionTouched = ref(false)
+const actionValues = reactive<Record<string, string>>({})
+/**
+ * 编辑时读回来的那一份动作（类型 + payload）。界面上只列必填项，
+ * 可选项没有栏可填，所以重建 payload 必须从这一份长出来，否则每编辑一次就抹掉一栏。
+ */
+const storedType = ref<EventType | null>(null)
+const storedPayload = ref<Record<string, unknown>>({})
 const errors = reactive<Record<string, string>>({})
 const saving = ref(false)
 const members = ref<MemberDto[]>([])
@@ -64,6 +80,106 @@ function syncWallPrefill(): void {
 
 const preset = computed(() => RRULE_PRESETS.find((p) => p.key === presetKey.value) ?? RRULE_PRESETS[0])
 const isEdit = computed(() => reminderId.value !== '')
+
+/**
+ * 「到点顺手记」的类型只由 pickAction 写入，所以 actionType 里只可能是空串或合法类型；
+ * 这里把它过一次守卫，脏值（老数据、以后加的类型）就当没带动作。
+ */
+const actionEventType = computed(() => (isEventType(actionType.value) ? actionType.value : null))
+/** 规范原话：这一格只列必填项，可选项到点了再补。 */
+const actionFields = computed<FieldSpec[]>(() =>
+  actionEventType.value ? fieldsFor(actionEventType.value).filter((f) => f.required) : [],
+)
+/** 必填的数字填了又不像数字：不能当成"没填"把它丢掉，得当场说出来。 */
+const actionNumberField = computed(
+  () =>
+    actionFields.value.find((f) => {
+      const raw = (actionValues[f.name] ?? '').trim()
+      return f.kind === 'number' && raw !== '' && !Number.isFinite(Number(raw))
+    }) ?? null,
+)
+
+/** 类型没换就沿用存好的那一份做底；换了类型，旧动作的可选项不该跟过来。 */
+const keptExtras = computed<Record<string, unknown>>(() =>
+  actionEventType.value === storedType.value ? storedPayload.value : {},
+)
+
+function buildActionPayload(): Record<string, unknown> {
+  const payload: Record<string, unknown> = { ...keptExtras.value }
+  for (const field of actionFields.value) {
+    const raw = (actionValues[field.name] ?? '').trim()
+    if (!raw) continue
+    if (field.kind === 'number') {
+      const asNumber = Number(raw)
+      if (Number.isFinite(asNumber)) payload[field.name] = asNumber
+    } else {
+      payload[field.name] = raw
+    }
+  }
+  return payload
+}
+
+/** 必填项是不是每一栏都写了字（合不合格是另一回事）。 */
+const actionFieldsFilled = computed(() =>
+  actionFields.value.every((f) => (actionValues[f.name] ?? '').trim() !== ''),
+)
+
+/**
+ * 提示语与提交分支的唯一依据：填齐必填项，并且这份预填过得了服务端那套完整校验。
+ * 两边判读方式一致（服务端也只认完整 payload，半份直接 400），所以"齐"和"合法"在这里是同一件事。
+ */
+const actionReady = computed(
+  () =>
+    actionEventType.value !== null &&
+    actionFieldsFilled.value &&
+    validateEventPayload(actionEventType.value, buildActionPayload()).ok,
+)
+
+/**
+ * 这一格现在真的会发生什么，就说什么。"还没填"和"填了又不合格"是两回事：
+ * 后者字已经写进去了，再说"还没填全"会让人以为自己敲的东西丢了。
+ * 睡眠/生长发育没有必填项，一栏都不填也算齐，那句得说清楚写下的是光板一条。
+ */
+const actionHint = computed(() => {
+  if (actionReady.value) {
+    return actionFields.value.length === 0
+      ? '到点直接记：这一类没有必填项，点一下就记下光板一条，细节到点了再补'
+      : '到点直接记：通知上点一下「记一笔」就写下这条'
+  }
+  // 生长发育：requiredFields 是空的，可 schema 的 refine 要至少一项测量值 ——
+  // 对着一个空白格子说"必填项还没填全"或"都填了"都是疯话。
+  if (actionFields.value.length === 0) return '这一格没有可填的栏，而这一类的预填还差一项：到点会打开记一笔'
+  return actionFieldsFilled.value
+    ? '必填项都填了，可这份预填不合格：到点只会打开记一笔'
+    : '到点打开记一笔（必填项还没填全）'
+})
+
+/**
+ * 编辑时没碰这一格，动作就整段不发：后端 PATCH 收不到的键原样留着，
+ * 而界面只列必填项，重建不出存好的可选项。这一格的动作校验也一起让开，
+ * 免得"改个标题"被人拦住。
+ */
+const actionKept = computed(() => isEdit.value && !actionTouched.value)
+
+/**
+ * 动作必须挂在某个孩子上：服务端对"带动作、没孩子"直接 400（提醒是家庭级的，
+ * 而记录必须有归属）。所以这里不换状态，只把话说明白——和 pickType 同一套处理。
+ */
+function pickAction(next: EventType | ''): void {
+  if (next && !childId.value) {
+    uni.showToast({ title: '带动作的提醒要先选关联的孩子', icon: 'none' })
+    return
+  }
+  actionTouched.value = true
+  actionType.value = next
+  for (const key of Object.keys(actionValues)) delete actionValues[key]
+}
+
+/** 选择型的那几栏走这里：既是写入也是"这一格我动过了"。 */
+function setActionValue(name: string, value: string): void {
+  actionTouched.value = true
+  actionValues[name] = value
+}
 
 /**
  * 类型在建好之后就不能再改了：后端的 UpdateReminderDto 刻意不收 `type`，而
@@ -106,6 +222,7 @@ function validate(): boolean {
   if (!trimmed) errors.title = '请输入提醒标题'
   else if (trimmed.length > 50) errors.title = '标题不超过 50 字'
   if (note.value.length > NOTE_MAX_LENGTH) errors.note = `备注不能超过 ${NOTE_MAX_LENGTH} 字`
+  if (!actionKept.value && actionType.value && !childId.value) errors.action = '带动作的提醒要先选关联的孩子'
   if (isRecurring.value) {
     try {
       currentRrule()
@@ -131,7 +248,14 @@ async function onSubmit(): Promise<void> {
       assigneeId: assigneeId.value || null,
       note: note.value.trim() || null,
     }
-    const base = { title: title.value.trim(), ...schedule, ...shared }
+    const action = {
+      eventType: actionEventType.value,
+      // 没填齐就不发：服务端只认完整 payload，半份会被 400 挡掉整条提醒。
+      actionPayload: actionReady.value ? buildActionPayload() : null,
+    }
+    // 编辑时没碰这一格就当动作没参与：PATCH 收不到的键服务端原样留着，
+    // 收得到就必须是完整的一份，而界面只能重建出必填项。
+    const base = { title: title.value.trim(), ...schedule, ...shared, ...(actionKept.value ? {} : action) }
     // 只有 POST 收 type：PATCH 发过去会被 whitelist 静默丢掉（见 pickType 的注释），
     // 写在这里只会让人以为改得动。
     if (reminderId.value) {
@@ -207,6 +331,14 @@ onLoad(async (query) => {
     note.value = reminder.note ?? ''
     childId.value = reminder.childId ?? ''
     assigneeId.value = reminder.assigneeId ?? ''
+    actionType.value = reminder.eventType ?? ''
+    storedType.value = isEventType(reminder.eventType ?? '') ? reminder.eventType : null
+    storedPayload.value = { ...(reminder.actionPayload as Record<string, unknown> | null ?? {}) }
+    for (const key of Object.keys(actionValues)) delete actionValues[key]
+    // 预填原样回填成字符串：数字字段也用字符串存，输入框与 buildActionPayload 同一套口径。
+    for (const [key, value] of Object.entries(reminder.actionPayload ?? {})) {
+      actionValues[key] = String(value)
+    }
     isRecurring.value = reminder.type === 'RECURRING'
     if (reminder.dueAt) {
       // 读回来也要按同一个时区念：用设备本地读会让"编辑—保存"每走一次就漂一格。
@@ -329,6 +461,49 @@ const goBack = () => stepBack()
       </view>
 
       <view class="field">
+        <text class="field__label">到点顺手记</text>
+        <view class="field__row">
+          <view class="chip" :class="{ 'chip--active': actionType === '' }" @click="pickAction('')">
+            <text class="chip__label">不带动作</text>
+          </view>
+          <view v-for="t in EVENT_TYPES" :key="t" class="chip" :class="{ 'chip--active': actionType === t }" @click="pickAction(t)">
+            <text class="chip__label">{{ EVENT_TYPE_META[t].icon }} {{ EVENT_TYPE_META[t].label }}</text>
+          </view>
+        </view>
+
+        <template v-if="actionType">
+          <view v-for="field in actionFields" :key="field.name" class="subfield">
+            <text class="field__label">{{ field.label }} *</text>
+            <view v-if="field.kind === 'select'" class="field__row">
+              <view
+                v-for="option in field.options"
+                :key="option.value"
+                class="chip"
+                :class="{ 'chip--active': actionValues[field.name] === option.value }"
+                @click="setActionValue(field.name, option.value)"
+              >
+                <text class="chip__label">{{ option.label }}</text>
+              </view>
+            </view>
+            <input
+              v-else
+              v-model="actionValues[field.name]"
+              class="field__input"
+              :type="field.kind === 'number' ? 'digit' : 'text'"
+              :placeholder="field.placeholder"
+              @input="actionTouched = true"
+            />
+          </view>
+          <text v-if="actionNumberField" class="field__error">{{ actionNumberField.label }}请填写数字</text>
+          <text class="field__hint">
+            {{ actionHint }}
+          </text>
+        </template>
+        <text v-else class="field__hint">不带动作就只是提醒，到点了不会替你记任何东西。</text>
+        <text v-if="errors.action" class="field__error">{{ errors.action }}</text>
+      </view>
+
+      <view class="field">
         <text class="field__label">备注</text>
         <textarea v-model="note" class="field__textarea" :maxlength="NOTE_MAX_LENGTH" placeholder="可选" />
         <text v-if="errors.note" class="field__error">{{ errors.note }}</text>
@@ -384,6 +559,13 @@ const goBack = () => stepBack()
   flex-wrap: wrap;
   gap: 12rpx;
   align-items: center;
+}
+
+/* 「到点顺手记」的预填项：同一张卡片里的小节，间距比顶层字段紧一档。 */
+.subfield {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
 }
 
 .field__input,

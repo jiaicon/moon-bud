@@ -189,6 +189,8 @@ model Event {
   note       String?
   createdBy  String    @db.Uuid
   updatedBy  String?   @db.Uuid
+  /// 「记一笔」一键生成的记录记下它的出处。刻意不加关系、不加级联：提醒停掉/删掉后，已经记下的记录必须留着。
+  fromReminderId String? @db.Uuid
   /// 一律软删除：硬删一条会让后续记录的连续性失去解释依据。
   deletedAt  DateTime? @db.Timestamptz(3)
   createdAt  DateTime  @default(now()) @db.Timestamptz(3)
@@ -222,6 +224,10 @@ model Reminder {
   timezone   String
   /// null 表示发给全家。
   assigneeId String?        @db.Uuid
+  /// 到点顺手记的记录类型；null = 这条提醒没有动作。取值受 @moonbud/shared 的 EVENT_TYPES 约束（库里不做枚举，改类型不必迁移）。
+  eventType     String?
+  /// 该动作的预填 payload。约定只有一种状态：要么 null，要么已经过该类型的完整 zod 校验（见 reminders.service.ts）。
+  actionPayload Json?
   status     ReminderStatus @default(ACTIVE)
   createdBy  String         @db.Uuid
   createdAt  DateTime       @default(now()) @db.Timestamptz(3)

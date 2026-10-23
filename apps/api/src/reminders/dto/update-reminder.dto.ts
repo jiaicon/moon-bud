@@ -1,4 +1,5 @@
-import { IsISO8601, IsOptional, IsString, IsUUID, MaxLength, MinLength, ValidateIf } from 'class-validator'
+import { IsIn, IsISO8601, IsObject, IsOptional, IsString, IsUUID, MaxLength, MinLength, ValidateIf } from 'class-validator'
+import { EVENT_TYPES, type EventType } from '@moonbud/shared'
 import { IsIanaTimezone } from '../../common/validators/is-iana-timezone'
 
 /**
@@ -42,4 +43,17 @@ export class UpdateReminderDto {
   @IsOptional()
   @IsUUID()
   assigneeId?: string | null
+
+  /**
+   * `@IsOptional()` 在这里正合适：`null` 就是要"清掉动作"，跳过校验让它流到服务层；
+   * 非 null 的脏值仍会被 @IsIn 拦下。`dueAt` 那条恰好相反——那里 null 是必须拦的。
+   */
+  @IsOptional()
+  @IsIn(EVENT_TYPES as unknown as string[], { message: '未知的记录类型' })
+  eventType?: EventType | null
+
+  /** 省略 = 沿用库里那条；显式 null = 清掉预填。 */
+  @IsOptional()
+  @IsObject()
+  actionPayload?: Record<string, unknown> | null
 }

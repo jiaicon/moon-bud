@@ -81,4 +81,61 @@ describe('数据库 schema', () => {
     `
     expect(Number(rows[0].n)).toBe(1)
   })
+
+  it('提醒可以存一个动作，记录可以记住它是从哪条提醒来的', async () => {
+    const u = await prisma.user.create({
+      data: { username: 'schema_act1', passwordHash: 'x', nickname: 'A', timezone: 'Asia/Shanghai' },
+    })
+    const f = await prisma.family.create({ data: { name: 'F', ownerId: u.id } })
+    const c = await prisma.child.create({
+      data: { familyId: f.id, name: '大宝', gender: 'UNKNOWN', birthday: new Date('2025-01-01') },
+    })
+    const r = await prisma.reminder.create({
+      data: {
+        familyId: f.id,
+        childId: c.id,
+        title: '吃维D',
+        type: 'ONE_TIME',
+        dueAt: new Date(),
+        timezone: 'Asia/Shanghai',
+        createdBy: u.id,
+        eventType: 'medicine',
+        actionPayload: { name: '维D', dose: '400IU' },
+      },
+    })
+    expect(r.eventType).toBe('medicine')
+    expect(r.actionPayload).toEqual({ name: '维D', dose: '400IU' })
+
+    const e = await prisma.event.create({
+      data: {
+        childId: c.id,
+        familyId: f.id,
+        type: 'medicine',
+        occurredAt: new Date(),
+        payload: { name: '维D', dose: '400IU' },
+        createdBy: u.id,
+        fromReminderId: r.id,
+      },
+    })
+    expect(e.fromReminderId).toBe(r.id)
+  })
+
+  it('没有动作的提醒（老数据）读回来两者都是 null', async () => {
+    const u = await prisma.user.create({
+      data: { username: 'schema_act2', passwordHash: 'x', nickname: 'B', timezone: 'Asia/Shanghai' },
+    })
+    const f = await prisma.family.create({ data: { name: 'G', ownerId: u.id } })
+    const r = await prisma.reminder.create({
+      data: {
+        familyId: f.id,
+        title: '交疫苗本',
+        type: 'ONE_TIME',
+        dueAt: new Date(),
+        timezone: 'Asia/Shanghai',
+        createdBy: u.id,
+      },
+    })
+    expect(r.eventType).toBeNull()
+    expect(r.actionPayload).toBeNull()
+  })
 })

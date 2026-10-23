@@ -115,7 +115,7 @@ export const useOutboxStore = defineStore('outbox', {
     async submitUpdate(
       familyId: string,
       eventId: string,
-      input: Partial<Omit<EventCreateInput, 'childId'>>,
+      input: Partial<Omit<EventCreateInput, 'childId' | 'fromReminderId'>>,
     ): Promise<SubmitResult> {
       this.load()
       try {

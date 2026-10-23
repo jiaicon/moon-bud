@@ -2,12 +2,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NotificationDto } from '@moonbud/shared'
 
 const listMock = vi.hoisted(() => vi.fn())
-vi.mock('../../api/endpoints', () => ({ notificationsApi: { list: listMock } }))
+const markReadMock = vi.hoisted(() => vi.fn())
+const submitCreateMock = vi.hoisted(() => vi.fn())
+const navMock = vi.hoisted(() => vi.fn())
+vi.mock('../../api/endpoints', () => ({
+  notificationsApi: { list: listMock, markRead: markReadMock },
+}))
+// 弹框点下去要走 quick-record 那一整套（出箱、标已读、刷角标），这里只把它的外围换成假的，
+// 判定本身必须是真的 —— 否则"单条带动作才给记一笔"这条规矩就没人验。
+vi.mock('../../stores/outbox', () => ({ useOutboxStore: () => ({ submitCreate: submitCreateMock }) }))
+vi.mock('../tab-badge', () => ({ refreshUnreadTabBadge: vi.fn() }))
 
 const { planDueWatch, dueWatchMessage, startDueWatch, stopDueWatch, resetDueWatch } =
   await import('../due-watch')
 
-function notify(id: string, opts: { occurrence?: string | null; title?: string } = {}): NotificationDto {
+function notify(
+  id: string,
+  opts: { occurrence?: string | null; title?: string; action?: NotificationDto['action'] } = {},
+): NotificationDto {
   return {
     id,
     userId: 'u-1',
@@ -17,6 +29,8 @@ function notify(id: string, opts: { occurrence?: string | null; title?: string }
     body: '',
     readAt: null,
     createdAt: '2026-10-19T09:00:00.000Z',
+    // 这些用例只管"什么时候该弹"，动作由"三个样子"那批用例自己造。
+    action: opts.action ?? null,
   }
 }
 
@@ -25,6 +39,7 @@ interface ModalCall {
   content?: string
   showCancel?: boolean
   confirmText?: string
+  cancelText?: string
   success?: (res: { confirm: boolean; cancel: boolean }) => void
   complete?: () => void
 }
@@ -37,6 +52,12 @@ let restore: (() => void) | null = null
 function tapConfirm(): void {
   const last = modals[modals.length - 1]
   last?.success?.({ confirm: true, cancel: false })
+  last?.complete?.()
+}
+
+function tapCancel(): void {
+  const last = modals[modals.length - 1]
+  last?.success?.({ confirm: false, cancel: true })
   last?.complete?.()
 }
 
@@ -218,5 +239,103 @@ describe('轮询的那层壳', () => {
     await vi.advanceTimersByTimeAsync(180_000)
     expect(listMock).toHaveBeenCalledTimes(1)
     expect(modals).toEqual([])
+  })
+})
+
+describe('到点弹框的三个样子', () => {
+  const action = {
+    reminderId: 'r-1',
+    childId: 'c-1',
+    eventType: 'medicine' as const,
+    payload: { name: '维D', dose: '400IU' },
+  }
+
+  beforeEach(() => {
+    submitCreateMock.mockReset()
+    markReadMock.mockReset()
+    navMock.mockReset()
+    g.uni = { ...g.uni, navigateTo: navMock }
+  })
+
+  /** 走到弹框、拿到最近那一个框的配置。 */
+  async function popUp(items: NotificationDto[]) {
+    vi.useFakeTimers()
+    listMock.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20 })
+    startDueWatch()
+    await vi.advanceTimersByTimeAsync(0)
+    listMock.mockResolvedValue({ items, total: items.length, page: 1, pageSize: 20 })
+    await vi.advanceTimersByTimeAsync(60_000)
+    return modals[modals.length - 1]
+  }
+
+  it('单条带动作的到点：确认按钮是"记一笔"，点它就写库', async () => {
+    submitCreateMock.mockResolvedValue({ kind: 'saved', event: { id: 'e-1' } })
+    markReadMock.mockResolvedValue(notify('n-1', { action }))
+    const modal = await popUp([notify('n-1', { title: '吃维D', action })])
+
+    expect(modal.confirmText).toBe('记一笔')
+    expect(modal.cancelText).toBe('知道了')
+    expect(modal.showCancel).toBe(true)
+
+    tapConfirm()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(submitCreateMock).toHaveBeenCalledWith('f-1', {
+      childId: 'c-1',
+      type: 'medicine',
+      occurredAt: expect.any(String),
+      payload: { name: '维D', dose: '400IU' },
+      fromReminderId: 'r-1',
+      note: null,
+    })
+    expect(markReadMock).toHaveBeenCalledWith('n-1')
+  })
+
+  it('点"知道了"（取消）不写库、不标已读，弹框状态照常复位', async () => {
+    const item = notify('n-1', { title: '吃维D', action })
+    const modal = await popUp([item])
+    expect(modal.showCancel).toBe(true)
+
+    tapCancel()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(submitCreateMock).not.toHaveBeenCalled()
+    expect(markReadMock).not.toHaveBeenCalled()
+
+    // 框点掉了（alertOpen 复位），下一条到点照样能弹。
+    const next = notify('n-2', { title: '洗澡' })
+    listMock.mockResolvedValue({ items: [item, next], total: 2, page: 1, pageSize: 20 })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(modals.map((m) => m.content)).toEqual(['到点了：吃维D', '到点了：洗澡'])
+  })
+
+  it('单条只带类型的到点：确认按钮是"去记一笔"，点了跳表单', async () => {
+    const modal = await popUp([notify('n-1', { action: { ...action, payload: null } })])
+    expect(modal.confirmText).toBe('去记一笔')
+
+    tapConfirm()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(navMock).toHaveBeenCalledWith({
+      url: '/pages/event-form/index?type=medicine&childId=c-1&familyId=f-1&reminderId=r-1',
+    })
+    expect(submitCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('多条到点仍然只有一个"知道了"', async () => {
+    const modal = await popUp([
+      notify('n-1', { title: '吃维D', action }),
+      notify('n-2', { title: '洗澡', action: { ...action, reminderId: 'r-2' } }),
+    ])
+    expect(modal.content).toBe('2 条提醒到点')
+    expect(modal.showCancel).toBe(false)
+    expect(modal.confirmText).toBe('知道了')
+
+    tapConfirm()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(submitCreateMock).not.toHaveBeenCalled()
+  })
+
+  it('无动作的单条保持今天的样子', async () => {
+    const modal = await popUp([notify('n-1', { title: '吃维D' })])
+    expect(modal.showCancel).toBe(false)
+    expect(modal.confirmText).toBe('知道了')
   })
 })

@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
-import type { Prisma, Reminder } from '@prisma/client'
-import type { Paginated, ReminderDto } from '@moonbud/shared'
+import { Prisma, type Reminder } from '@prisma/client'
+import { isEventType, validateEventPayload } from '@moonbud/shared'
+import type { EventPayload, EventType, Paginated, ReminderDto } from '@moonbud/shared'
 import { PrismaService } from '../prisma/prisma.service'
 import { OccurrencesService } from './occurrences.service'
 import type { CreateReminderDto } from './dto/create-reminder.dto'
@@ -19,10 +20,53 @@ function toReminderDto(reminder: Reminder, overdueSince: Date | null = null): Re
     rrule: reminder.rrule,
     timezone: reminder.timezone,
     assigneeId: reminder.assigneeId,
+    // 库里是裸 String（加类型不必迁移），读回来在这里收窄；不在 EVENT_TYPES 里的脏值当没有动作。
+    eventType: isEventType(reminder.eventType) ? reminder.eventType : null,
+    actionPayload: (reminder.actionPayload as EventPayload | null) ?? null,
     status: reminder.status,
     createdBy: reminder.createdBy,
     createdAt: reminder.createdAt.toISOString(),
     overdueSince: overdueSince?.toISOString() ?? null,
+  }
+}
+
+/**
+ * 提醒动作的写入规则，第一期唯一的判定点（第二期 AI 也走这里）：
+ * 有类型必须有孩子；预填非空必须过该类型的完整校验；没有类型就没有预填；
+ * 类型变了等于换了一件事，旧预填不能跟着走。
+ *
+ * `current` 是库里已有的那条，PATCH 用它区分"这次没动的部分"。null = 新增。
+ */
+function resolveAction(
+  input: { eventType?: EventType | null; actionPayload?: Record<string, unknown> | null },
+  childId: string | null,
+  current: Reminder | null,
+): { eventType: string | null; actionPayload: Prisma.InputJsonValue | typeof Prisma.DbNull } {
+  const typeTouched = input.eventType !== undefined
+  const eventType = typeTouched ? (input.eventType ?? null) : (current?.eventType ?? null)
+
+  // 带了预填就用它；没带但改了类型就清空；两者都没动才沿用库里那条。
+  const payload =
+    input.actionPayload !== undefined
+      ? (input.actionPayload ?? null)
+      : typeTouched
+        ? null
+        : ((current?.actionPayload as Record<string, unknown> | null) ?? null)
+
+  if (eventType && !childId) throw new BadRequestException('带动作的提醒必须挂在某个孩子上')
+  if (!eventType && payload) {
+    throw new BadRequestException('没有记录类型就没有预填：请先选类型，或把预填一起清掉')
+  }
+  if (eventType && payload) {
+    if (!isEventType(eventType)) throw new BadRequestException('未知的记录类型')
+    const result = validateEventPayload(eventType, payload)
+    if (!result.ok) throw new BadRequestException(`预填不完整：${result.errors.join('；')}`)
+  }
+
+  return {
+    eventType: eventType ?? null,
+    // 可空 JSON 只能用 DbNull 表达"没有"：写 null 会被 Prisma 拒绝（它表示 JSON 字面量 null）。
+    actionPayload: payload === null ? Prisma.DbNull : (payload as Prisma.InputJsonValue),
   }
 }
 
@@ -42,6 +86,12 @@ export class RemindersService {
       dto.timezone ??
       (await this.prisma.user.findUniqueOrThrow({ where: { id: userId } })).timezone
 
+    const action = resolveAction(
+      { eventType: dto.eventType, actionPayload: dto.actionPayload },
+      dto.childId ?? null,
+      null,
+    )
+
     const reminder = await this.prisma.reminder.create({
       data: {
         familyId,
@@ -53,6 +103,8 @@ export class RemindersService {
         rrule: dto.rrule ?? null,
         timezone,
         assigneeId: dto.assigneeId ?? null,
+        eventType: action.eventType,
+        actionPayload: action.actionPayload,
         createdBy: userId,
       },
     })
@@ -106,6 +158,13 @@ export class RemindersService {
       (dto.dueAt !== undefined &&
         new Date(dto.dueAt).getTime() !== (reminder.dueAt?.getTime() ?? 0))
 
+    // 生效的孩子：这次没提就沿用库里那条，显式 null 表示摘掉孩子（也算没孩子）。
+    const action = resolveAction(
+      { eventType: dto.eventType, actionPayload: dto.actionPayload },
+      dto.childId === undefined ? reminder.childId : dto.childId,
+      reminder,
+    )
+
     const data: Prisma.ReminderUpdateInput = {
       ...(dto.title === undefined ? {} : { title: dto.title }),
       ...(dto.note === undefined ? {} : { note: dto.note }),
@@ -114,6 +173,8 @@ export class RemindersService {
       ...(dto.timezone === undefined ? {} : { timezone: dto.timezone }),
       ...(dto.childId === undefined ? {} : { childId: dto.childId }),
       ...(dto.assigneeId === undefined ? {} : { assigneeId: dto.assigneeId }),
+      eventType: action.eventType,
+      actionPayload: action.actionPayload,
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {

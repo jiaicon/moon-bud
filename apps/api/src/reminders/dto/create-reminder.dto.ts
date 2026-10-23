@@ -1,13 +1,14 @@
 import {
   IsIn,
   IsISO8601,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
   MinLength,
 } from 'class-validator'
-import type { ReminderType } from '@moonbud/shared'
+import { EVENT_TYPES, type EventType, type ReminderType } from '@moonbud/shared'
 import { IsIanaTimezone } from '../../common/validators/is-iana-timezone'
 
 export class CreateReminderDto {
@@ -47,4 +48,17 @@ export class CreateReminderDto {
   @IsOptional()
   @IsUUID()
   assigneeId?: string
+
+  /** 「到点顺手记」的记录类型，省略 = 这条提醒没有动作。 */
+  @IsOptional()
+  @IsIn(EVENT_TYPES as unknown as string[], { message: '未知的记录类型' })
+  eventType?: EventType
+
+  /**
+   * 该动作的预填 payload。这里只认"是个对象"，结构和类型/孩子一起在写入规则里判：
+   * 单看这一个字段判不出对错（同一份 payload 换个类型就不合法）。
+   */
+  @IsOptional()
+  @IsObject()
+  actionPayload?: Record<string, unknown>
 }

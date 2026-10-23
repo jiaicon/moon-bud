@@ -28,6 +28,7 @@ function toEventDto(event: EventWithCreator): EventDto {
     createdBy: event.createdBy,
     createdByNickname: event.creator.nickname,
     updatedBy: event.updatedBy,
+    fromReminderId: event.fromReminderId,
     createdAt: event.createdAt.toISOString(),
     updatedAt: event.updatedAt.toISOString(),
   }
@@ -56,6 +57,7 @@ export class EventsService {
       payload: payload as Prisma.InputJsonValue,
       note: dto.note ?? null,
       createdBy: userId,
+      ...(dto.fromReminderId ? { fromReminderId: dto.fromReminderId } : {}),
     }
 
     try {

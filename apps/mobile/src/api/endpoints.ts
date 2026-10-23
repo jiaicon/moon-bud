@@ -3,6 +3,7 @@ import type {
   ChildDto,
   DeviceDto,
   EventDto,
+  EventType,
   FamilyDto,
   FamilyRole,
   InviteDto,
@@ -45,6 +46,13 @@ export interface EventCreateInput {
   endedAt?: string | null
   payload: unknown
   note?: string | null
+  /**
+   * 「记一笔」生成的记录带上出处。只有创建能带，PATCH 不收（见 update）。
+   * 允许显式 null：手记的那一笔就是"没有出处"，而服务端的 @IsOptional 认 null，
+   * 出箱落盘时 undefined 会被 JSON 丢掉、null 会留着——两者都要能表达同一件事，
+   * 留 null 这一种才和 note/endedAt 的写法一致。
+   */
+  fromReminderId?: string | null
 }
 
 export interface ReminderCreateInput {
@@ -56,6 +64,9 @@ export interface ReminderCreateInput {
   rrule?: string | null
   timezone?: string
   assigneeId?: string | null
+  /** 「到点顺手记」：只带类型 = 到点跳表单；类型 + 完整预填 = 到点直接记。半份预填服务端会 400。 */
+  eventType?: EventType | null
+  actionPayload?: Record<string, unknown> | null
 }
 
 /**
@@ -125,9 +136,9 @@ export const childrenApi = {
 export const eventsApi = {
   list: (familyId: string, query?: Query) => apiRequest<Paginated<EventDto>>(`/families/${familyId}/events`, { query }),
   create: (familyId: string, input: EventCreateInput) => apiRequest<EventDto>(`/families/${familyId}/events`, { method: 'POST', data: input }),
-  // PATCH 没有 childId 这个字段（UpdateEventDto），whitelist 会静默丢掉：
-  // 类型里也不许出现"把记录挪到另一个孩子"这种承诺。
-  update: (familyId: string, eventId: string, input: Partial<Omit<EventCreateInput, 'childId'>>) =>
+  // PATCH 没有 childId 也没有 fromReminderId 这两个字段（UpdateEventDto），whitelist 会静默丢掉：
+  // 类型里也不许出现"把记录挪到另一个孩子""改它的出处"这种承诺。
+  update: (familyId: string, eventId: string, input: Partial<Omit<EventCreateInput, 'childId' | 'fromReminderId'>>) =>
     apiRequest<EventDto>(`/families/${familyId}/events/${eventId}`, { method: 'PATCH', data: input }),
   remove: (familyId: string, eventId: string) => apiRequest<void>(`/families/${familyId}/events/${eventId}`, { method: 'DELETE' }),
   latest: (familyId: string, childId: string, type: EventDto['type']) =>

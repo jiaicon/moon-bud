@@ -31,7 +31,8 @@ describe('记录表单不会把用户填的东西丢掉', () => {
   /**
    * 3. UpdateEventDto 没有 childId，而全局 ValidationPipe 是 whitelist 且不禁额外字段：
    *    编辑时发过去的 childId 被丢掉，还是 200，界面写着"已更新"。要么别发，
-   *    要么就得真的支持"把记录挪到另一个孩子"——那是另一件事。
+   *    要么就得真的支持"把记录挪到另一个孩子"——那是另一件事。fromReminderId 同理：
+   *    出处只在创建那一路有意义，编辑不收，类型里也不许出现"改出处"这种承诺。
    *    保存现在走待同步出箱（submitUpdate/submitCreate），这条约束照样成立：
    *    childId 只在创建那一路出现，编辑那一路只认 familyId + editingId。
    */
@@ -39,11 +40,27 @@ describe('记录表单不会把用户填的东西丢掉', () => {
     expect(source).not.toMatch(/submitUpdate\([^)]*childId/)
     expect(source).toMatch(/outboxStore\.submitUpdate\(familyId\.value, editingId\.value, shared\)/)
     // 创建这一路要带 childId（新建的记录得有归属）。
-    expect(source).toMatch(/submitCreate\(familyId\.value, \{ childId, \.\.\.shared \}\)/)
+    expect(source).toMatch(/submitCreate\(familyId\.value, \{\s*childId,/)
   })
 
-  it('客户端的类型也不再声称记录可以换孩子', () => {
+  it('客户端的类型也不再声称记录可以换孩子、可以改出处', () => {
     const api = readFileSync(join(srcDir, 'api/endpoints.ts'), 'utf8')
-    expect(api).toMatch(/input: Partial<Omit<EventCreateInput, 'childId'>>/)
+    expect(api).toMatch(/input: Partial<Omit<EventCreateInput, 'childId' \| 'fromReminderId'>>/)
+  })
+
+  /**
+   * 4. 通知上的「去记一笔」跳进这张表单时只带了类型。表单于是按记录页那个"当前孩子"
+   *    落笔：人刚从二宝的通知点进来，这一笔就记到了大宝身上——而屏幕上那句
+   *    "记录对象"是填完才发现的，出处（哪条提醒叫起来的）也整个丢了。
+   */
+  it('从通知跳来的表单认通知那个孩子和那条提醒，不拿"当前孩子"顶替', () => {
+    expect(source).toMatch(/query\?\.childId/)
+    expect(source).toMatch(/query\?\.familyId/)
+    expect(source).toMatch(/query\?\.reminderId/)
+    // 出处只在创建那一路有得说；编辑那一路不发（PATCH 不收，发了就是那句"已更新"撒谎）。
+    expect(source).toMatch(/childId,\n\s*fromReminderId: fromReminderId\.value,/)
+    expect(source).not.toMatch(/submitUpdate\([^)]*fromReminderId/)
+    // 落笔的孩子：通知（或那条记录）钉住的优先，"当前孩子"只兜底。
+    expect(source).toMatch(/const childId = targetChildId\.value \|\|/)
   })
 })

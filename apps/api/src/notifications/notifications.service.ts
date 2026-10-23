@@ -1,11 +1,71 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common'
 import type { Notification, Reminder } from '@prisma/client'
-import type { NotificationDto, Paginated } from '@moonbud/shared'
+import {
+  isEventType,
+  type EventPayload,
+  type NotificationDto,
+  type NotificationQuickActionDto,
+  type Paginated,
+} from '@moonbud/shared'
 import { PrismaService } from '../prisma/prisma.service'
 import { PUSH_PROVIDER, type PushProvider } from '../push/push-provider.interface'
 import type { QueryNotificationsDto } from './dto/query-notifications.dto'
 
-function toNotificationDto(notification: Notification): NotificationDto {
+/** 动作只用到这几列，别把整行拖进来。孩子的 archivedAt 是"这条还写得进去吗"的唯一权威。 */
+const INCLUDE_OCCURRENCE = {
+  occurrence: {
+    include: {
+      reminder: {
+        select: {
+          id: true,
+          childId: true,
+          eventType: true,
+          actionPayload: true,
+          child: { select: { archivedAt: true } },
+        },
+      },
+    },
+  },
+} as const
+
+type NotificationWithReminder = Notification & {
+  occurrence: {
+    reminder: {
+      id: string
+      childId: string | null
+      eventType: string | null
+      actionPayload: unknown
+      child: { archivedAt: Date | null } | null
+    } | null
+  } | null
+}
+
+/**
+ * 到点通知才可能有动作，五个条件缺一不可：挂在实例上、提醒有类型、
+ * 类型是认识的记录类型、挂着孩子、那个孩子还没归档。
+ *
+ * 第四条是给历史脏数据准备的：库里可能存在"有类型没孩子"的行（写入规则禁止，
+ * 但规则之前就有了），回一个 `childId: null` 的动作只会让客户端写库失败。
+ *
+ * 第五条归档这条必须由服务端判：客户端拿到的孩子列表**本来就不含归档的孩子**
+ * （`children.service.ts` 的 `where: { archivedAt: null }`），所以它在客户端是
+ * "看不见"的 —— 而写记录那一侧对归档孩子是 400。把 payload 置空，动作就退化成
+ * 「去记一笔」，由表单用它现成的方式说清楚为什么记不进去。
+ */
+function buildAction(row: NotificationWithReminder): NotificationQuickActionDto | null {
+  const reminder = row.occurrence?.reminder
+  if (!reminder?.eventType || !reminder.childId) return null
+  if (!isEventType(reminder.eventType)) return null
+  const archived = reminder.child?.archivedAt != null
+  return {
+    reminderId: reminder.id,
+    childId: reminder.childId,
+    eventType: reminder.eventType,
+    payload: archived ? null : ((reminder.actionPayload as EventPayload | null) ?? null),
+  }
+}
+
+function toNotificationDto(notification: NotificationWithReminder): NotificationDto {
   return {
     id: notification.id,
     userId: notification.userId,
@@ -15,6 +75,7 @@ function toNotificationDto(notification: Notification): NotificationDto {
     body: notification.body,
     readAt: notification.readAt?.toISOString() ?? null,
     createdAt: notification.createdAt.toISOString(),
+    action: buildAction(notification),
   }
 }
 
@@ -36,6 +97,7 @@ export class NotificationsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.notification.findMany({
         where,
+        include: INCLUDE_OCCURRENCE,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -51,7 +113,10 @@ export class NotificationsService {
    * 重复标记是幂等的——已读再标一次不该报错。
    */
   async markRead(id: string, userId: string): Promise<NotificationDto> {
-    const existing = await this.prisma.notification.findUnique({ where: { id } })
+    const existing = await this.prisma.notification.findUnique({
+      where: { id },
+      include: INCLUDE_OCCURRENCE,
+    })
     if (!existing || existing.userId !== userId) {
       throw new NotFoundException('通知不存在')
     }
@@ -60,6 +125,7 @@ export class NotificationsService {
     const updated = await this.prisma.notification.update({
       where: { id },
       data: { readAt: new Date() },
+      include: INCLUDE_OCCURRENCE,
     })
     return toNotificationDto(updated)
   }

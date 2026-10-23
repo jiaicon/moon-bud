@@ -31,6 +31,19 @@ describe('记录', () => {
       .get(`/api/families/${familyId}/events?${query}`)
       .set('Authorization', `Bearer ${me.token}`)
 
+  /** 直接绕过 HTTP 造一条提醒：出处指向的提醒不一定经本套件的接口建。 */
+  const seedReminder = () =>
+    prisma.reminder.create({
+      data: {
+        familyId,
+        title: '吃维D',
+        type: 'ONE_TIME',
+        dueAt: new Date(),
+        timezone: 'Asia/Shanghai',
+        createdBy: me.id,
+      },
+    })
+
   beforeAll(async () => {
     app = await createTestApp()
     prisma = app.get(PrismaService)
@@ -375,5 +388,51 @@ describe('记录', () => {
     expect(page1.body.pageSize).toBe(2)
 
     await list(`childId=${childId}&pageSize=100000`).expect(400)
+  })
+
+  it('带 fromReminderId 创建会存下来并回读', async () => {
+    const reminder = await seedReminder()
+    const res = await post({
+      childId,
+      type: 'medicine',
+      occurredAt: '2026-10-16T02:00:00.000Z',
+      payload: { name: '维D', dose: '400IU' },
+      fromReminderId: reminder.id,
+    }).expect(201)
+    expect(res.body.fromReminderId).toBe(reminder.id)
+  })
+
+  it('fromReminderId 不是合法 UUID 就 400', async () => {
+    await post({
+      childId,
+      type: 'medicine',
+      occurredAt: '2026-10-16T02:00:00.000Z',
+      payload: { name: '维D', dose: '400IU' },
+      fromReminderId: '提醒-1',
+    }).expect(400)
+  })
+
+  /**
+   * 出处不是可编辑属性：UpdateEventDto 里没有它，whitelist 会把 PATCH 发过来的
+   * `fromReminderId` 静默丢掉。这里的"静默丢掉"恰好是我们要的——改个类型
+   * 不该把"这条是几点那次提醒顺手记的"抹掉，所以把它钉成测试而不是留给运气。
+   */
+  it('PATCH 不收 fromReminderId：改了类型也不会把出处丢掉', async () => {
+    const reminder = await seedReminder()
+    const otherReminder = await seedReminder()
+    const created = await post({
+      childId,
+      type: 'medicine',
+      occurredAt: '2026-10-16T02:00:00.000Z',
+      payload: { name: '维D', dose: '400IU' },
+      fromReminderId: reminder.id,
+    }).expect(201)
+
+    const res = await request(app.getHttpServer())
+      .patch(`/api/families/${familyId}/events/${created.body.id}`)
+      .set('Authorization', `Bearer ${me.token}`)
+      .send({ type: 'temperature', payload: { celsius: 36.8 }, fromReminderId: otherReminder.id })
+      .expect(200)
+    expect(res.body.fromReminderId).toBe(reminder.id)
   })
 })

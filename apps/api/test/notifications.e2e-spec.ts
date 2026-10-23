@@ -1,4 +1,5 @@
 import type { INestApplication } from '@nestjs/common'
+import { Prisma } from '@prisma/client'
 import request from 'supertest'
 import { createTestApp, resetDatabase } from './utils/db'
 import { PrismaService } from '../src/prisma/prisma.service'
@@ -53,6 +54,45 @@ describe('通知', () => {
   const list = (token: string, query = '') =>
     request(app.getHttpServer())
       .get(`/api/notifications${query}`)
+      .set('Authorization', `Bearer ${token}`)
+
+  /**
+   * 带动作的到点实例。刻意用 prisma 直造而不走 HTTP：这一组要用到 T2 规则**禁止**的
+   * 组合（有类型没孩子），读接口照样得把它说成"没动作"。
+   */
+  const seedActionOccurrence = async (
+    opts: {
+      childId?: string | null
+      eventType?: string | null
+      actionPayload?: Prisma.InputJsonValue
+    } = {},
+  ) => {
+    const dueAt = new Date(Date.now() - 60_000)
+    const reminder = await prisma.reminder.create({
+      data: {
+        familyId,
+        childId: opts.childId ?? null,
+        title: '吃维D',
+        type: 'ONE_TIME',
+        dueAt,
+        timezone: 'Asia/Shanghai',
+        createdBy: me.id,
+        eventType: opts.eventType ?? null,
+        actionPayload: opts.actionPayload ?? Prisma.DbNull,
+      },
+    })
+    const occurrence = await prisma.reminderOccurrence.create({ data: { reminderId: reminder.id, dueAt } })
+    return { reminderId: reminder.id, childId: reminder.childId, occurrenceId: occurrence.id }
+  }
+
+  const seedChild = async () =>
+    prisma.child.create({
+      data: { familyId, name: '宝宝', gender: 'UNKNOWN', birthday: new Date('2026-01-01') },
+    })
+
+  const read = (token: string, id: string) =>
+    request(app.getHttpServer())
+      .post(`/api/notifications/${id}/read`)
       .set('Authorization', `Bearer ${token}`)
 
   beforeAll(async () => {
@@ -172,5 +212,104 @@ describe('通知', () => {
   it('未登录读不到任何通知', async () => {
     await request(app.getHttpServer()).get('/api/notifications').expect(401)
     await request(app.getHttpServer()).post('/api/notifications/read-all').expect(401)
+  })
+
+  it('到点通知带出这条提醒的动作', async () => {
+    const child = await seedChild()
+    const seeded = await seedActionOccurrence({
+      childId: child.id,
+      eventType: 'medicine',
+      actionPayload: { name: '维D', dose: '400IU' },
+    })
+    await notifications.createForOccurrence(seeded.occurrenceId)
+
+    const res = await list(me.token, '?unreadOnly=true').expect(200)
+    expect(res.body.items[0].action).toEqual({
+      reminderId: seeded.reminderId,
+      childId: child.id,
+      eventType: 'medicine',
+      payload: { name: '维D', dose: '400IU' },
+    })
+  })
+
+  it('孩子已归档时 action.payload 置空：到点只许给「去记一笔」', async () => {
+    // 这一刀只能由服务端来切：客户端的孩子列表接口本来就不返回归档孩子
+    // （children.service 过滤 archivedAt: null），所以它永远"看不见"归档这回事，
+    // 而 events.service 对归档孩子是 400 —— 给了「记一笔」就是许一个必然落空的愿。
+    const child = await seedChild()
+    const seeded = await seedActionOccurrence({
+      childId: child.id,
+      eventType: 'medicine',
+      actionPayload: { name: '维D', dose: '400IU' },
+    })
+    await notifications.createForOccurrence(seeded.occurrenceId)
+    await prisma.child.update({ where: { id: child.id }, data: { archivedAt: new Date() } })
+
+    const res = await list(me.token, '?unreadOnly=true').expect(200)
+    expect(res.body.items[0].action).toEqual({
+      reminderId: seeded.reminderId,
+      childId: child.id,
+      eventType: 'medicine',
+      payload: null,
+    })
+  })
+
+  it('没有动作的到点通知 action 为 null', async () => {
+    const occ = await seedOccurrence()
+    await notifications.createForOccurrence(occ.id)
+
+    const res = await list(me.token, '?unreadOnly=true').expect(200)
+    expect(res.body.items[0].action).toBeNull()
+  })
+
+  it('payload 为空的带动作提醒，action.payload 是 null（到点要跳表单）', async () => {
+    const child = await seedChild()
+    const seeded = await seedActionOccurrence({ childId: child.id, eventType: 'medicine' })
+    await notifications.createForOccurrence(seeded.occurrenceId)
+
+    const res = await list(me.token, '?unreadOnly=true').expect(200)
+    expect(res.body.items[0].action).toEqual({
+      reminderId: seeded.reminderId,
+      childId: child.id,
+      eventType: 'medicine',
+      payload: null,
+    })
+  })
+
+  it('家庭级提醒（childId 为 null 的老数据）不产生 action', async () => {
+    // 库里可能存在这种历史脏行：回一个 childId 为 null 的 action，客户端只会写库失败。
+    const seeded = await seedActionOccurrence({ eventType: 'medicine' })
+    await notifications.createForOccurrence(seeded.occurrenceId)
+
+    const res = await list(me.token, '?unreadOnly=true').expect(200)
+    expect(res.body.items[0].action).toBeNull()
+  })
+
+  it('找回密码那类通知（不挂在任何实例上）action 为 null', async () => {
+    await prisma.notification.create({
+      data: { userId: me.id, familyId, occurrenceId: null, title: '有人申请找回密码', body: 'B' },
+    })
+
+    const res = await list(me.token).expect(200)
+    expect(res.body.items[0].action).toBeNull()
+  })
+
+  it('markRead 的返回同样带 action', async () => {
+    const child = await seedChild()
+    const seeded = await seedActionOccurrence({
+      childId: child.id,
+      eventType: 'medicine',
+      actionPayload: { name: '维D', dose: '400IU' },
+    })
+    await notifications.createForOccurrence(seeded.occurrenceId)
+    const id = (await list(me.token).expect(200)).body.items[0].id as string
+
+    const res = await read(me.token, id).expect(200)
+    expect(res.body.action).toEqual({
+      reminderId: seeded.reminderId,
+      childId: child.id,
+      eventType: 'medicine',
+      payload: { name: '维D', dose: '400IU' },
+    })
   })
 })

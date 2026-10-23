@@ -4,6 +4,7 @@ import { blockGuestDeepLink } from '../../guest/deep-link'
 import { computed, ref } from 'vue'
 import { notificationsApi } from '../../api/endpoints'
 import { notificationTarget } from '../../notifications/routing'
+import { quickRecordPlan, submitQuickRecord } from '../../notifications/quick-record'
 import { refreshUnreadTabBadge } from '../../notifications/tab-badge'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useAuthStore } from '../../stores/auth'
@@ -72,6 +73,47 @@ async function markRead(item: NotificationDto): Promise<void> {
   } catch (err) {
     uni.showToast({ title: err instanceof Error ? err.message : '标记失败', icon: 'none' })
   }
+}
+
+/**
+ * 这一行能不能顺手记一笔。判定的话（有动作吗、预填齐吗）只在 quick-record
+ * 那一处说，本页只是把结果画出来——弹框、这一页、以后别的地方读的是同一个结论，
+ * 不会出现"弹框说能记、这里没有按钮"。
+ * 没有动作时返回 null，模板的 v-if 才有的可判。
+ */
+function actionOf(item: NotificationDto) {
+  const plan = quickRecordPlan(item, new Date())
+  return plan.kind === 'none' ? null : plan
+}
+
+/**
+ * 点芯片：记掉它，或者把它要记的那件事打开。
+ * `@click.stop` 是必须的——不拦下来就会先记一笔再连着整行跳到提醒页。
+ */
+async function act(item: NotificationDto): Promise<void> {
+  const plan = actionOf(item)
+  if (!plan) return
+  if (plan.kind === 'form') {
+    uni.navigateTo({ url: plan.url })
+    return
+  }
+  let result: 'saved' | 'queued'
+  try {
+    result = await submitQuickRecord(plan, item.id)
+  } catch (err) {
+    uni.showToast({ title: err instanceof Error ? err.message : '记失败，请稍后重试', icon: 'none' })
+    return
+  }
+  // 点完不再弹任何东西：这一行不再红着，就是这次点下去的反馈。
+  // 在线那一路角标 submitQuickRecord 里已经补过了，这里只把列表重新取一次。
+  if (result === 'queued') {
+    // 断网那一次重新取列表必定失败，于是「通知加载失败」会紧跟着刚记上的一笔出现，
+    // 说得像这一笔没记上——其实它已经进了待同步。就地把自己这条标成已读（它真的
+    // 不再需要人看），等网络回来由下拉刷新/onShow 去和服务端对账。
+    item.readAt = new Date().toISOString()
+    return
+  }
+  void load(true)
 }
 
 /** 通知只是路标：点它要落到那件事发生的地方，而不是统一推到提醒页。 */
@@ -169,6 +211,7 @@ onPullDownRefresh(() => {
           <text class="card__body-text">{{ item.body }}</text>
           <text class="card__time">{{ fmt(item.createdAt) }}</text>
         </view>
+        <text v-if="actionOf(item)" class="link" @click.stop="act(item)">{{ actionOf(item)?.label }}</text>
       </view>
 
       <u-empty

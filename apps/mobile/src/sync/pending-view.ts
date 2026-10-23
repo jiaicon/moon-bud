@@ -45,6 +45,7 @@ export function pendingCreateRows(items: OutboxItem[], familyId: string, meta: S
       createdBy: meta.userId,
       createdByNickname: meta.nickname,
       updatedBy: null,
+      fromReminderId: null,
       createdAt: new Date(item.enqueuedAt).toISOString(),
       updatedAt: new Date(item.enqueuedAt).toISOString(),
     })

@@ -1,5 +1,6 @@
 import type { NotificationDto } from '@moonbud/shared'
 import { notificationsApi } from '../api/endpoints'
+import { quickRecordPlan, submitQuickRecord } from './quick-record'
 
 /** 一分钟问一次：提醒的精度就是分钟，再快也只是白跑请求。 */
 const POLL_MS = 60_000
@@ -51,11 +52,28 @@ let alertOpen = false
 
 function showDueAlert(items: NotificationDto[]): void {
   alertOpen = true
+  // 多条一律不给动作：一屏里让人先挑一条来记，就是把"点一下"变成"想一下"，
+  // 而要点掉的框本来就不该塞进选择。多条时先去通知中心点那一条。
+  const plan =
+    items.length === 1 ? quickRecordPlan(items[0], new Date()) : ({ kind: 'none' } as const)
+
   uni.showModal({
     title: '到点了',
     content: dueWatchMessage(items),
-    showCancel: false,
-    confirmText: '知道了',
+    // 没有动作可给就只有一个"知道了"，不给人多按一次的空按钮。
+    showCancel: plan.kind !== 'none',
+    confirmText: plan.kind === 'none' ? '知道了' : plan.label,
+    cancelText: '知道了',
+    success: (res) => {
+      if (!res.confirm) return
+      if (plan.kind === 'record') {
+        void submitQuickRecord(plan, items[0].id).catch((err) => {
+          uni.showToast({ title: err instanceof Error ? err.message : '记失败，请稍后重试', icon: 'none' })
+        })
+      } else if (plan.kind === 'form') {
+        uni.navigateTo({ url: plan.url })
+      }
+    },
     // 用 complete 而不是 success：不管是点确认、按返回键还是别的路子收掉，
     // 这一句都要跑到 —— 漏一次就把后面的提醒全哑掉了。
     complete: () => {

@@ -32,7 +32,13 @@ const outboxStore = useOutboxStore()
 
 const type = ref<EventType | ''>('')
 const editingId = ref('')
-const editingChildId = ref('')
+/**
+ * 这一笔挂在哪个孩子身上：编辑时来自那条记录，从通知「去记一笔」进来时来自那条通知。
+ * 它和记录页那个"当前孩子"是两件事——拿后者当默认值，等于替人决定记在谁身上。
+ */
+const targetChildId = ref('')
+/** 这一笔是哪条提醒叫起来的；手记的那一笔没有出处。 */
+const fromReminderId = ref<string | null>(null)
 const values = reactive<Record<string, string>>({})
 const errors = reactive<Record<string, string>>({})
 const note = ref('')
@@ -66,6 +72,10 @@ function syncWallPrefill(): void {
 }
 
 const child = computed(() => childStore.currentChild(familyId.value))
+/** 钉住的那个孩子在当前缓存里叫什么；查不到就是 null，界面得说实话而不能换个孩子。 */
+const pinnedChild = computed(
+  () => (childStore.childrenByFamily[familyId.value] ?? []).find((c) => c.id === targetChildId.value) ?? null,
+)
 const fields = computed<FieldSpec[]>(() => (type.value ? fieldsFor(type.value) : []))
 const meta = computed(() => (type.value ? EVENT_TYPE_META[type.value] : null))
 /** 只有睡眠需要"结束时间"，其它类型的时长写在 payload 里。 */
@@ -79,11 +89,12 @@ const halfFilledEnd = computed(
 )
 
 const targetChildName = computed(() => {
-  if (!editingId.value) return child.value ? child.value.name : '未选择孩子'
-  const found = (childStore.childrenByFamily[familyId.value] ?? []).find(
-    (c) => c.id === editingChildId.value,
-  )
-  return found ? found.name : '（这条记录的孩子不在当前家庭里）'
+  if (targetChildId.value) {
+    // 归档的孩子（客户端根本拿不到）或者别的一家的孩子：照原样记下去，让服务端的
+    // 400 说实话，不能悄悄换成"当前孩子"——那等于把这一笔记到了另一个孩子身上。
+    return pinnedChild.value ? pinnedChild.value.name : '（这条记录的孩子不在当前家庭里）'
+  }
+  return child.value ? child.value.name : '未选择孩子'
 })
 
 function resetForm(): void {
@@ -100,9 +111,11 @@ function resetForm(): void {
  * 提示是锦上添花，把"记不下来"当成它的代价就本末倒置了。
  */
 async function loadDuplicateHint(next: EventType): Promise<void> {
-  if (!familyId.value || !child.value) return
+  // 提示要按这一笔真正落到的那个孩子查，不是记录页选中的那个。
+  const target = targetChildId.value ? pinnedChild.value : child.value
+  if (!familyId.value || !target) return
   try {
-    const latest = await eventsApi.latest(familyId.value, child.value.id, next)
+    const latest = await eventsApi.latest(familyId.value, target.id, next)
     const hint = shouldWarnDuplicate({
       latest: latest.event,
       type: next,
@@ -133,8 +146,15 @@ onLoad(async (query) => {
   // 直开深链接时先等它，不然预填出来的是兜底时区的钟点。
   if (!authStore.user) await authStore.bootstrap()
   syncWallPrefill()
+  // 通知上的「去记一笔」带着它自己的家庭、孩子和提醒（见 notifications/quick-record.ts）。
+  // 不先切到那一家、不把这一笔钉在那个孩子上，它就会记进当前家庭、当前孩子身上——
+  // 人明明是从另一个孩子的提醒点进来的。手记的那一路没有这些参数，照常按当前走。
+  const fromFamily = String(query?.familyId ?? '')
+  if (fromFamily && fromFamily !== familyStore.currentFamilyId) familyStore.switchFamily(fromFamily)
   await familyStore.load()
   if (familyId.value) await childStore.load(familyId.value)
+  targetChildId.value = String(query?.childId ?? '')
+  fromReminderId.value = String(query?.reminderId ?? '') || null
   const requested = String(query?.type ?? '')
   const id = String(query?.id ?? '')
   // 导航栏是 pages.json 里写死的"记一笔"，编辑时不改口会让人以为在新增一条。
@@ -149,7 +169,7 @@ onLoad(async (query) => {
       return
     }
     editingId.value = target.id
-    editingChildId.value = target.childId
+    targetChildId.value = target.childId
     type.value = target.type
     const state = eventToFormState(target, timezone.value)
     for (const [key, value] of Object.entries(state.values)) values[key] = value
@@ -202,8 +222,8 @@ function assignErrors(messages: string[]): void {
 
 async function onSubmit(): Promise<void> {
   if (saving.value || !type.value) return
-  // 编辑走记录自己挂的孩子；"当前孩子"是记录页的筛选口径，拿它覆盖会顺手把孩子改掉。
-  const childId = editingId.value ? editingChildId.value : child.value?.id ?? ''
+  // 编辑走记录自己挂的孩子，从通知跳来走通知那个孩子；"当前孩子"只是手记时的兜底。
+  const childId = targetChildId.value || (child.value?.id ?? '')
   if (!familyId.value || !childId) {
     uni.showToast({ title: '请先创建家庭并添加孩子', icon: 'none' })
     return
@@ -243,7 +263,12 @@ async function onSubmit(): Promise<void> {
       const res = await outboxStore.submitUpdate(familyId.value, editingId.value, shared)
       uni.showToast({ title: queuedToast(res, '已更新'), icon: 'none' })
     } else {
-      const res = await outboxStore.submitCreate(familyId.value, { childId, ...shared })
+      // 出处只在创建这一路有得说：PATCH 不收 fromReminderId，发过去等于让"已更新"撒谎。
+      const res = await outboxStore.submitCreate(familyId.value, {
+        childId,
+        fromReminderId: fromReminderId.value,
+        ...shared,
+      })
       uni.showToast({ title: queuedToast(res, '已记录'), icon: 'none' })
     }
     setTimeout(() => stepBack(), 600)

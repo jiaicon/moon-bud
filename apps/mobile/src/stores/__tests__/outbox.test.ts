@@ -63,6 +63,15 @@ describe('submitCreate', () => {
     await expect(store.submitCreate('f1', baseInput)).rejects.toThrow(permErr)
     expect(store.pendingCount).toBe(0)
   })
+
+  it('断网排队的那条带着出处，重放后出处不丢', async () => {
+    const store = freshStore()
+    ;(eventsApi.create as ReturnType<typeof vi.fn>).mockRejectedValue(netErr)
+    const res = await store.submitCreate('f1', { ...baseInput, fromReminderId: 'r-1' })
+    expect(res.kind).toBe('queued')
+    // 入队的 body 原样带着 fromReminderId，重放时照发——不然断网记的那笔就查不到出处了。
+    expect(store.items[0].body?.fromReminderId).toBe('r-1')
+  })
 })
 
 describe('submitUpdate / submitDelete', () => {

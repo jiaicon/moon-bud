@@ -35,4 +35,12 @@ export class CreateEventDto {
   @IsString()
   @MaxLength(500)
   note?: string
+
+  /**
+   * 「记一笔」一键生成的记录带上它是从哪条提醒顺手记的，用于以后统计"提醒真的有用吗"。
+   * 只有创建能带：出处不是可编辑属性，见 UpdateEventDto 故意没有它。
+   */
+  @IsOptional()
+  @IsUUID()
+  fromReminderId?: string
 }

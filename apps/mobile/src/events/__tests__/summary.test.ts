@@ -6,7 +6,7 @@ const ev = (id: string, type: EventDto['type'], minutesAgo: number): EventDto =>
   id, familyId: 'f1', childId: 'c1', type,
   occurredAt: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
   endedAt: null, payload: {}, note: null,
-  createdBy: 'u1', createdByNickname: '妈妈', updatedBy: null, createdAt: '', updatedAt: '',
+  createdBy: 'u1', createdByNickname: '妈妈', updatedBy: null, fromReminderId: null, createdAt: '', updatedAt: '',
 })
 
 describe('buildTodaySummary', () => {

@@ -6,7 +6,7 @@ const feeding = (minutesAgo: number) => ({
   occurredAt: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
   endedAt: null, payload: { method: 'bottle' as const, amountMl: 120 },
   note: null, createdBy: 'u1', createdByNickname: '爸爸',
-  updatedBy: null, createdAt: '', updatedAt: '',
+  updatedBy: null, fromReminderId: null, createdAt: '', updatedAt: '',
 })
 
 describe('relativeTime', () => {

@@ -47,6 +47,8 @@ const event = (
   createdBy: by,
   createdByNickname: nickname,
   updatedBy: null,
+  // 预览演示的是"记下来的样子"，不演示出处——出处只在到点那一按上起作用。
+  fromReminderId: null,
   createdAt: minutesAgo(minutesAgoValue),
   updatedAt: NOW(),
 })
@@ -76,6 +78,9 @@ export const MOCK_REMINDERS: ReminderDto[] = [
     rrule: null,
     timezone: 'Asia/Shanghai',
     assigneeId: DAD_ID,
+    // 预览不演示"到点顺手记"，两条 mock 提醒都没有动作。
+    eventType: null,
+    actionPayload: null,
     status: 'ACTIVE',
     createdBy: OWNER_ID,
     createdAt: minutesAgo(300),
@@ -93,6 +98,8 @@ export const MOCK_REMINDERS: ReminderDto[] = [
     rrule: null,
     timezone: 'Asia/Shanghai',
     assigneeId: null,
+    eventType: null,
+    actionPayload: null,
     status: 'ACTIVE',
     createdBy: OWNER_ID,
     createdAt: minutesAgo(1_440),

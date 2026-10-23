@@ -93,6 +93,12 @@ export interface EventDto {
    */
   createdByNickname: string
   updatedBy: string | null
+  /**
+   * 「记一笔」一键生成的记录才非空：它是这条记录的出处提醒。
+   * null 包含两种来历相同的旧数据——手写的记录，以及提醒已被停掉/删除的记录
+   * （库里刻意不加级联，删提醒不能把已经记下的成长痕迹一起抹掉）。
+   */
+  fromReminderId: string | null
   createdAt: string
   updatedAt: string
 }
@@ -116,6 +122,17 @@ export interface ReminderDto {
   rrule: string | null
   timezone: string
   assigneeId: string | null
+  /**
+   * 到点顺手记的记录类型。null = 这条提醒没有动作，只是"到点响一下"。
+   * 库里存的是裸 String，读回来时由服务端收窄成 EventType；脏值按 null 处理。
+   */
+  eventType: EventType | null
+  /**
+   * 该动作的预填 payload。只有一种状态是合法的：要么 null（「去记一笔」，点了进表单），
+   * 要么已经过该类型的完整 zod 校验（「记一笔」，点了直接落库）。服务端写入时把关，
+   * 客户端不再重跑校验，只读这个结论。
+   */
+  actionPayload: EventPayload | null
   status: ReminderStatus
   createdBy: string
   createdAt: string
@@ -139,6 +156,20 @@ export interface ReminderOccurrenceDto {
   completedAt: string | null
 }
 
+/**
+ * 通知右侧那个动作的完整描述：客户端拿到它就直接能落库或跳表单，不必再查提醒。
+ *
+ * 只在通知能 join 回一条 ACTIVE 之外仍然可读的提醒时才非空，且 `childId` 一定非空 ——
+ * 没有孩子的提醒不允许带动作（「记一笔」必须记在某个孩子身上）。
+ */
+export interface NotificationQuickActionDto {
+  reminderId: string
+  childId: string
+  eventType: EventType
+  /** null = 预填不全，只能「去记一笔」；非 null = 已经过完整校验，可以「记一笔」。 */
+  payload: EventPayload | null
+}
+
 export interface NotificationDto {
   id: string
   userId: string
@@ -148,6 +179,8 @@ export interface NotificationDto {
   body: string
   readAt: string | null
   createdAt: string
+  /** null = 这条通知没有可顺手做的动作（找回密码、纯提醒、或提醒已被停掉）。 */
+  action: NotificationQuickActionDto | null
 }
 
 /**

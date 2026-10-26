@@ -18,15 +18,27 @@ const at = (needle: string): number => {
 }
 
 describe('助手面板', () => {
-  it('草稿走一次性交接，不走 url：交接早于跳转', () => {
+  it('草稿走一次性交接，不走 url：交接早于跳转，而且只在真拿到草稿时', () => {
     // url 上带中文在 App 端会被再编码一次（见 draft-handoff.ts），面板绝不能退回那一套。
-    expect(sheet).toContain('stageDraft({ draft: result, childId: props.childId })')
-    expect(at('stageDraft({ draft: result')).toBeLessThan(at('uni.navigateTo({ url: target.url })'))
+    expect(sheet).toContain('if (target.draft) stageDraft({ draft: target.draft, childId: props.childId })')
+    expect(at('stageDraft({ draft: target.draft')).toBeLessThan(at('uni.navigateTo({ url: target.url })'))
     expect(sheet).not.toMatch(/navigateTo\(\{ url: `\/pages\/[^\n]*\?/)
   })
 
+  /**
+   * 2026-10-26 线上实测：那句"今天心情不好"带着 intentHint 重发，模型照旧回 unknown，
+   * 于是那两颗 chip 被再摆一遍——人点了一下，界面什么反应都没有。
+   * 跳转的判定必须接上 hint（人确认过的那一下比模型权威），而手里没草稿时不许塞一份空草稿，
+   * 否则表单顶部会念一句"助手按你说的话填好了"，而它一个字都没填。
+   */
+  it('点过 chip 之后不许原地打转：判定带上 hint，空手就不交接', () => {
+    expect(sheet).toContain('assistantTarget(result, hint)')
+    expect(sheet).toContain('if (target.draft) stageDraft')
+    expect(at("if (target.kind === 'unknown')")).toBeLessThan(at('uni.navigateTo({ url: target.url })'))
+  })
+
   it('没听懂时不换页、不清空原话，而是就地反问', () => {
-    const unknown = sheet.slice(at("if (target.kind === 'unknown')"), at("stageDraft({ draft: result"))
+    const unknown = sheet.slice(at("if (target.kind === 'unknown')"), at('stageDraft({ draft: target.draft'))
     expect(unknown).not.toContain('navigateTo')
     expect(unknown).not.toContain("text.value = ''")
     expect(unknown).toContain('clarify.value = true')

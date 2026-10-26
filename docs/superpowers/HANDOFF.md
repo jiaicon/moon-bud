@@ -1158,9 +1158,21 @@ App 那一路必须重新云打包才带得走这个修复**——装机的那�
   提示词里追加一段「【人已确认】…intent 必须是 X，另一个槽留 null」，而"没说就留 null"那句照旧管用——
   人确认的是**意图**，不是替人编内容。DTO 用 `@ValidateIf((_o, v) => v !== undefined)` + `@IsIn`，
   因为 `@IsOptional()` 会把 `null` 放过去，而 null 不是一次确认。
+- **但提示词锁不住模型**（2026-10-26 线上实测，真实 DeepSeek）：那句「今天心情不好」带着
+  `intentHint` 重发，两次都还是 `unknown`，还有一次直接回了空内容（`contentLen=0` → `ASSISTANT_BAD_OUTPUT`）。
+  于是"点一下 chip"在真机上表现为**什么也没发生**——那两颗 chip 又摆一遍。修法不是继续加提示词，
+  而是**人点的那一下算数**：`assistantTarget(draft, hint)` 在 draft 仍然不可用时按 hint 落到那张表单，
+  并且 `draft: null` → 不交接草稿，所以表单顶部不会念一句"助手按你说的话填好了"的空话。
+  提示词那一段留着（模型听话时它确实能带回有用的预填），但它不再是唯一的保险。
 - **横幅取代跳转前那句 toast。** `dropped` 现在随草稿进本地交接（`PickedEvent/PickedReminder.dropped`），
   表单顶部那条（`.ask-banner`）用 `askBannerCopy(dropped)` 说实话：什么都没丢才允许说"填好了"。
   编辑那一路拿不到横幅（event-form 在 `if (id)` 分支里 return，reminder-form 是 `id ? null : take…`）。
+- **模型给了标题却没给时间，是"还没填全"，不是"没听懂"**（同日线上实测改的口径）。
+  老契约在 zod 里有一条硬 refine：一次性必须带时刻、周期必须带规则，缺一样整份判坏 → 人听到
+  「这句我没看懂，手动记一下」，而它明明听懂了（那句是「明天宝宝发烧要留意」）。现在这条 refine 删掉，
+  缺时间降级交出去并把栏目报进 `dropped`：一次性少钟点就空着那一格等人填；周期少规则**降成一次性**
+  （表单上"每天/每周"那几档是从 `rrule` 反读的，没有规则摆不出档位），钟点与规则两格一起进 `dropped`。
+  标题仍是硬闸：一条没有名字的提醒在锁屏上只是一句"你有一条提醒"。
 
 ### 这一轮定下来的口径（下期别推翻）
 
@@ -1180,14 +1192,16 @@ App 那一路必须重新云打包才带得走这个修复**——装机的那�
 
 ### 验证（都是亲眼读过的输出）
 
-- mobile：**114 文件 / 825 例全绿**，`vue-tsc` 0 错。新增 5 个测试文件（`ask-flow` 7、`ask-sheet` 7、
+- mobile：**114 文件 / 829 例全绿**，`vue-tsc` 0 错。新增 5 个测试文件（`ask-flow` 7、`ask-sheet` 7、
   `home-ask-entry` 7、`list-ask-pill` 8、`ask-banner` 8）+ `draft-handoff` +1，每一条都先看过 RED。
   旧的 `home-ask-bar.test.ts` 删掉了：它钉的那 6 条里有 4 条整块搬进了 `ask-sheet.test.ts`，
   剩下"只画在 ready 那一支""排在告警之前"折进 `home-ask-entry.test.ts`。
 - api：**24 套 / 226 例全绿**（`--runInBand`），其中 `assistant-prompt` 与 `assistant` 各加了
   `intentHint` 的用例（有 hint 时提示词里有「人已确认」且「不要猜」还在；透传到 provider 的那一层；
   `unknown`/空串/3/null 一律 400 且 `parse` 没被调用）。
-- shared：**4 文件 / 69 例全绿**（`AssistantIntentHint` 只是类型，无运行时代码）。
+- shared：**4 文件 / 71 例全绿**（`AssistantIntentHint` 只是类型，无运行时代码；
+  多出的 2 例是上面那条降级：一次性缺时刻、周期缺规则各一条，都先看过 RED——
+  它们对面的是原来那两条"判坏"的用例，那两条按新口径改写了，不是删掉了事）。
 - 首页/表单源码扫描里那些"页面不许碰 `assistantApi`""不许再出现 `有些字段没填上`"的钉，
   都是这一轮加的：**入口越多的地方，越要把判定锁在一处**。
 - **本地 H5 真走了一遍**（2026-10-26 傍晚，用一次性假上游把 `DEEPSEEK_BASE_URL` 指到
@@ -1197,8 +1211,9 @@ App 那一路必须重新云打包才带得走这个修复**——装机的那�
   **「有些字段没填上，在下面补一下」** 且奶量格子确实是空的（第 9 步那条）；
   「每天早 8 点提醒吃维D 400IU」→ 新建提醒：标题是**汉字**、重复/每天/08:00（从 `rrule` 读回来的）、
   用药高亮、药品名与剂量齐、底部那句是「到点直接记…」；「今天心情不好」→ **不换页**，话留着，
-  面板里长出「记一笔 / 设提醒」；点「设提醒」→ 落到新建提醒且预填齐全（说明 `intentHint`
-  真的进到了提示词那一句）；记录页与提醒页那颗胶囊各自开的是**同一个面板**；
+  面板里长出「记一笔 / 设提醒」；点「设提醒」→ 落到新建提醒且预填齐全。**注意那是假上游在配合**：
+  假上游按 hint 回了草稿，所以这一步只证明了 hint 到了提示词那一句；
+  真实模型并不听话，同一句带 hint 重发两次都还是 unknown（见下面「线上实测读到的那两条」）；记录页与提醒页那颗胶囊各自开的是**同一个面板**；
   游客态三处入口全不摆（首页与两个列表页的右下角胶囊、列表页的「＋」都不在 DOM 里）。
   顺带验出一件事：**面板的输入框在浏览器里能正常打字**，`uni-input` 那一坑确实被门禁堵住了。
 - **第二趟（同日傍晚，用户提「首页的"说一句话"也放在右下角」）**：首页那块实心块改成与两个列表页
@@ -1207,17 +1222,32 @@ App 那一路必须重新云打包才带得走这个修复**——装机的那�
   本地 H5 热更新后亲眼读到首页 DOM 里是 `.ask-pill`（`bottom: calc(var(--window-bottom) + 40rpx)`）、
   `.ask-entry` 已不在，点开仍是同一个面板。
 
-### 上线（本轮跑到哪、还差什么）
+### 线上实测读到的那两条（2026-10-26 晚，部署完之后）
 
-`nest build` 干净。**H5 已重建并替换**（`/var/www/moonbud/h5`，旧的留在 `h5.old-2026-10-26d`），
-公网 `index.html`、`pages-event-list-index.Cf14cR4z.js`、`pages-home-index.83ovBkoD.js` 都是 200，
-最后一个里面能查到「说一句话」。
+前两条 chip/降级的问题都不是推理出来的，是**部署完在公网 URL 上打了一轮真 DeepSeek** 读到的：
 
-**API 镜像还没重建**：这一轮的改动（`prompt.ts`、DTO、service/provider 签名）都在工作区里没提交，
-而服务器那一侧的固定路线是 `git bundle` → `master` ff-only → `docker compose build api`。
-不提交就没法走这条路，也不该往服务器的 checkout 里手抄文件（那会让它和 master 分叉）。
-**线上那一版还不认 `intentHint`**：`whitelist: true, forbidNonWhitelisted: false`，所以带着这个字段
-请求不会 400，只会被丢掉——面板上「记一笔 / 设提醒」那两个 chip 因此现在只是把同一句话原样再发一次，
-大概率还是 unknown、留在原地。**功能不坏，但那一步还没生效**，重建镜像才好。
-**App 那一路必须重新云打包**：装机版既没有乱码修复，也没有这一轮的三个入口。
+- 4 次调用里 1 次 `ASSISTANT_BAD_OUTPUT`，日志那一句是
+  `reminder: 一次性提醒必须有时刻，周期提醒必须有规则` —— 人说的话它听懂了，界面却说没听懂。→ 上面那条降级。
+- 那句「今天心情不好」带 `intentHint=reminder`、`intentHint=event` 各发一次，**两次都回 unknown**；
+  客户端于是把那两颗 chip 再摆一遍，表现就是"点了一下没反应"。→ 上面那条"人点的那一下算数"。
+- 顺带读到：`intentHint` 在生产那条 `whitelist: true, forbidNonWhitelisted: false` 的管道里
+  **确实活下来了**（带 `intentHint: "banana"` 回 400「这句是要记一笔，还是设提醒？」；
+  被丢掉的话根本到不了 `@IsIn`，不可能 400）。这一条以前只是推断，现在是实测。
+
+本地 H5 把改完的两条走了一遍（真 DeepSeek，不再是假上游）：「今天心情不好」→ 反问 → 点「设提醒」
+→ `#/pages/reminder-form/index`，**没有横幅**、标题栏确实是空的；「明天宝宝发烧要留意」→ 新建提醒，
+标题「留意宝宝发烧」+ 横幅「有些字段没填上，在下面补一下」（`dropped = ['reminder.dueAtWallClock']`）。
+
+### 上线（跑到哪了）
+
+`d5151d5` + 这两处修复都已上线，路线仍是 `git bundle master` → 服务器 `fetch` + `merge --ff-only`
+→ `docker compose --env-file .env -f deploy/compose.prod.yml build api` → `up -d`
+（`--env-file` 不能省，原因写在 compose 文件头）；H5 是本地 `pnpm build:h5` → tar → `/var/www/moonbud/h5`，
+旧目录留在 `h5.old-2026-10-26e`。亲眼读到的：服务器 `git log -1` 是新提交、容器起来后
+`4 migrations found / No pending migrations to apply`、启动日志两行
+**推送通道：uniCloud 云函数（已配置）** 与 **助手通道：DeepSeek（已配置）**、
+公网 `/` 与三个页面 chunk 全 200、`/api/health` 回 `{"status":"ok","db":"up"}`。
+线上冒烟用的临时账号（`smoked140`）已按 username 删掉，`mengxi` 那 23 条提醒删前删后计数一致。
+
+**App 那一路必须重新云打包**：装机版既没有乱码修复，也没有这一轮的三个入口，更没有这两条修复。
 

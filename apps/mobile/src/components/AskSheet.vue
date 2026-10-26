@@ -41,14 +41,15 @@ async function send(hint?: AssistantIntentHint): Promise<void> {
   asking.value = true
   try {
     const result = await assistantApi.parse(said, hint)
-    const target = assistantTarget(result)
+    const target = assistantTarget(result, hint)
     if (target.kind === 'unknown') {
       // 不换页、不清空：话留着，人只要点一下那两种意图之一，同一句话再说一次。
       clarify.value = true
       return
     }
     // 草稿走本地一次性交接，url 上只有页名（原因见 assistant/draft-handoff.ts）。
-    stageDraft({ draft: result, childId: props.childId })
+    // 空手去那张表单时什么都不交接——不然表单顶部会念一句"助手按你说的话填好了"。
+    if (target.draft) stageDraft({ draft: target.draft, childId: props.childId })
     uni.navigateTo({ url: target.url })
     text.value = ''
     clarify.value = false

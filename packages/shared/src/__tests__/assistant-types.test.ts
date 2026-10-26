@@ -50,6 +50,60 @@ describe('sanitizeAssistantDraft', () => {
     expect(r.data.dropped).toEqual([])
   })
 
+  /**
+   * 2026-10-26 线上实测：「明天宝宝发烧要留意」模型回了一张没时刻的一次性提醒，
+   * 老契约把整份判坏，人听到的是一句"这句我没看懂"——可它明明听懂了，只是没说时间。
+   * 认得出意图、认得出标题的草稿不该整份扔掉：留下能给的那半，缺的那栏报进 dropped，
+   * 让表单顶部那条横幅说实话。
+   */
+  it('一次性提醒没说时刻：标题留着，时刻报成没填上', () => {
+    const r = sanitizeAssistantDraft(
+      {
+        intent: 'reminder',
+        reminder: {
+          title: '留意宝宝发烧',
+          type: 'ONE_TIME',
+          dueAtWallClock: null,
+          rrule: null,
+          eventType: null,
+          actionPayload: {},
+        },
+      },
+      'Asia/Shanghai',
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.reminder?.title).toBe('留意宝宝发烧')
+    expect(r.data.reminder?.type).toBe('ONE_TIME')
+    expect(r.data.dropped).toContain('reminder.dueAtWallClock')
+  })
+
+  /** 周期那一支不能只清掉规则：表单的档位是从 rrule 反读出来的，没有规则就摆不出"每天"，
+   *  所以降成一次性，让时刻那一栏堂堂正正地空着等人填。 */
+  it('周期提醒没给规则：降成一次性，规则与时刻都报成没填上', () => {
+    const r = sanitizeAssistantDraft(
+      {
+        intent: 'reminder',
+        reminder: {
+          title: '量体温',
+          type: 'RECURRING',
+          dueAtWallClock: null,
+          rrule: null,
+          eventType: null,
+          actionPayload: {},
+        },
+      },
+      'Asia/Shanghai',
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.reminder?.title).toBe('量体温')
+    expect(r.data.reminder?.type).toBe('ONE_TIME')
+    expect(r.data.reminder?.rrule).toBeNull()
+    expect(r.data.dropped).toContain('reminder.rrule')
+    expect(r.data.dropped).toContain('reminder.dueAtWallClock')
+  })
+
   it('unknown 意图不要求任何负载', () => {
     const r = sanitizeAssistantDraft({ intent: 'unknown' }, 'Asia/Shanghai')
     expect(r.ok).toBe(true)
@@ -190,7 +244,7 @@ describe('sanitizeAssistantDraft', () => {
     expect(r.data.dropped).toContain('event.payload')
   })
 
-  it('标题空白与周期缺规则都判坏：这两样没法让人补', () => {
+  it('标题空白判坏：没有名字的提醒在锁屏上只是一句"你有一条提醒"', () => {
     expect(
       sanitizeAssistantDraft(
         {
@@ -207,44 +261,26 @@ describe('sanitizeAssistantDraft', () => {
         'Asia/Shanghai',
       ).ok,
     ).toBe(false)
-    expect(
-      sanitizeAssistantDraft(
-        {
-          intent: 'reminder',
-          reminder: {
-            title: '吃维D',
-            type: 'RECURRING',
-            dueAtWallClock: null,
-            rrule: null,
-            eventType: null,
-            actionPayload: {},
-          },
-        },
-        'Asia/Shanghai',
-      ).ok,
-    ).toBe(false)
   })
 
-  it('一次性提醒缺时刻判坏，周期提醒可以不带时刻', () => {
-    const draft = (over: Record<string, unknown>) => ({
-      intent: 'reminder',
-      reminder: {
-        title: '吃维D',
-        type: 'ONE_TIME',
-        dueAtWallClock: null,
-        rrule: null,
-        eventType: null,
-        actionPayload: {},
-        ...over,
+  it('周期提醒带规则可以不带时刻，dropped 保持干净', () => {
+    const r = sanitizeAssistantDraft(
+      {
+        intent: 'reminder',
+        reminder: {
+          title: '吃维D',
+          type: 'RECURRING',
+          dueAtWallClock: null,
+          rrule: 'FREQ=DAILY;BYHOUR=08;BYMINUTE=0',
+          eventType: null,
+          actionPayload: {},
+        },
       },
-    })
-    expect(sanitizeAssistantDraft(draft({}), 'Asia/Shanghai').ok).toBe(false)
-    expect(
-      sanitizeAssistantDraft(
-        draft({ type: 'RECURRING', dueAtWallClock: null, rrule: 'FREQ=DAILY;BYHOUR=08;BYMINUTE=0' }),
-        'Asia/Shanghai',
-      ).ok,
-    ).toBe(true)
+      'Asia/Shanghai',
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.data.dropped).toEqual([])
   })
 
   it('动作类型认不出来就只清这一格，标题与时刻照旧出门', () => {

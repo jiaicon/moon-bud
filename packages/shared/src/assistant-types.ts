@@ -66,7 +66,8 @@ const eventDraft = z
 
 /**
  * 标题必填（trim 后非空）：一条没有名字的提醒推送到锁屏上只是一句"你有一条提醒"。
- * 时刻与周期规则则按 type 二选一，见下面的 refine。
+ * 时刻/规则这里**不设硬闸**：模型给了标题却没给时间，是"还没填全"而不是"没听懂"，
+ * 整份作废会让人听见一句假的"没看懂"。缺哪一格由 sanitize 报进 dropped，表单顶部那条横幅说实话。
  */
 const reminderDraft = z
   .object({
@@ -80,9 +81,6 @@ const reminderDraft = z
     actionPayload: z.record(z.unknown()).default({}),
   })
   .strict()
-  .refine((r) => (r.type === 'ONE_TIME' ? r.dueAtWallClock !== null : r.rrule !== null), {
-    message: '一次性提醒必须有时刻，周期提醒必须有规则',
-  })
 
 const envelope = z
   .object({
@@ -259,21 +257,32 @@ export function sanitizeAssistantDraft(raw: unknown, timezone: string): Sanitize
 
   let cleanReminder: AssistantReminderDraft | null = null
   if (reminder !== null) {
-    const slot = reminder.eventType
+    // 没说时间不整份作废，但两种缺法走法不同：一次性少钟点，那一格空着等人填就行；
+    // 周期少规则就摆不出来了——表单上"每天/每周"那几档是从 rrule 反读的，
+    // 所以降成一次性，并把两格时刻都报进 dropped，让人自己挑。
+    let timed = reminder
+    if (timed.type === 'RECURRING' && timed.rrule === null) {
+      dropped.push('reminder.rrule')
+      dropped.push('reminder.dueAtWallClock')
+      timed = { ...timed, type: 'ONE_TIME' as const, dueAtWallClock: null }
+    } else if (timed.type === 'ONE_TIME' && timed.dueAtWallClock === null) {
+      dropped.push('reminder.dueAtWallClock')
+    }
+    const slot = timed.eventType
     const type: EventType | null = slot !== null && isEventType(slot) ? slot : null
     if (slot !== null && type === null) {
       dropped.push('reminder.eventType')
     }
     if (type === null) {
       // 没有动作类型，动作负载就没有归属；留着它只会在表单里长出一栏没人要的预填。
-      if (Object.keys(reminder.actionPayload).length > 0) dropped.push('reminder.actionPayload')
-      cleanReminder = { ...reminder, eventType: null, actionPayload: {} }
+      if (Object.keys(timed.actionPayload).length > 0) dropped.push('reminder.actionPayload')
+      cleanReminder = { ...timed, eventType: null, actionPayload: {} }
     } else {
-      const checked = validateEventPayload(type, normalizeAssistantPayload(reminder.actionPayload))
+      const checked = validateEventPayload(type, normalizeAssistantPayload(timed.actionPayload))
       if (checked.ok) {
-        cleanReminder = { ...reminder, eventType: type, actionPayload: checked.data as Record<string, unknown> }
+        cleanReminder = { ...timed, eventType: type, actionPayload: checked.data as Record<string, unknown> }
       } else {
-        cleanReminder = { ...reminder, eventType: type, actionPayload: {} }
+        cleanReminder = { ...timed, eventType: type, actionPayload: {} }
         dropped.push('reminder.actionPayload')
       }
     }

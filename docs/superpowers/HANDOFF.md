@@ -1240,14 +1240,32 @@ App 那一路必须重新云打包才带得走这个修复**——装机的那�
 
 ### 上线（跑到哪了）
 
-`d5151d5` + 这两处修复都已上线，路线仍是 `git bundle master` → 服务器 `fetch` + `merge --ff-only`
+`d5151d5`（存在感 v1）与 `c3d4db4`（上面那两条修复）都已上线，路线仍是
+`git bundle master` → 服务器 `fetch` + `merge --ff-only`
 → `docker compose --env-file .env -f deploy/compose.prod.yml build api` → `up -d`
 （`--env-file` 不能省，原因写在 compose 文件头）；H5 是本地 `pnpm build:h5` → tar → `/var/www/moonbud/h5`，
-旧目录留在 `h5.old-2026-10-26e`。亲眼读到的：服务器 `git log -1` 是新提交、容器起来后
+旧目录留在 `h5.old-2026-10-26e`（修复那一趟又换了一次，上一版在 `h5.old-2026-10-26f`）。亲眼读到的：服务器
+`git log -1` 是新提交、容器起来后
 `4 migrations found / No pending migrations to apply`、启动日志两行
 **推送通道：uniCloud 云函数（已配置）** 与 **助手通道：DeepSeek（已配置）**、
 公网 `/` 与三个页面 chunk 全 200、`/api/health` 回 `{"status":"ok","db":"up"}`。
-线上冒烟用的临时账号（`smoked140`）已按 username 删掉，`mengxi` 那 23 条提醒删前删后计数一致。
+线上冒烟用的临时账号已按 username 删掉，`mengxi` 那 23 条提醒删前删后计数一致。
+
+**修复上线后再打了一次公网真模型**（同一路线：注册的临时账号 `smoke140c`，验完即删）：
+「明天宝宝发烧要留意」→ `intent=reminder`、标题「留意宝宝发烧」、`type` 被降级成 `ONE_TIME`、
+`dropped=["reminder.dueAtWallClock"]` —— 也就是**线上现在会说"没填全"，不再说"没听懂"**；
+「每天早8点提醒吃维D 400IU」→ `dropped` 干净、`rrule=FREQ=DAILY;BYHOUR=08;BYMINUTE=00`；
+「今天心情不好」带 `intentHint=reminder` → 仍回 `intent=null`（**hint 锁不住模型这件事在线上再次确认**），
+所以那一步全靠客户端：点过 chip 就带着空手进表单，横幅不出现。
+另外线上读到 `eventType` 那格模型留了 `null`（"吃维D"没被判成用药），`dropped` 里没有它 ——
+这是提示词的软度，不是缺陷，人自己点一下就有。
+
+**服务器上直接动库的那两个坑**（删冒烟账号时踩到的，写下来免得下次再踩）：
+`sudo docker exec moonbud-postgres psql … <<SQL` **不带 `-i` 会把 stdin 丢掉**，psql 读到空输入、
+一句没跑还回 0 —— 必须 `docker exec -i`；表名是 snake_case（`users` / `family_members`），
+列名是 camelCase（`"ownerId"` / `"createdBy"`），所以**删账号是 `DELETE FROM families WHERE "ownerId"=…`
+再 `DELETE FROM users`**（`families.owner` 是 `onDelete: Restrict`，顺序反了就被挡），
+全程 `-v ON_ERROR_STOP=1` 套在 `BEGIN…COMMIT` 里，并且把真实账号的行数打在删前删后两处对照。
 
 **App 那一路必须重新云打包**：装机版既没有乱码修复，也没有这一轮的三个入口，更没有这两条修复。
 

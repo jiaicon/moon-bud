@@ -181,6 +181,37 @@ onLoad(async (query) => {
     return
   }
   if (isEventType(requested)) chooseType(requested)
+
+  // ---- 助手预填：「说一句话」换成草稿后跳进来时带的三个参数 ----
+  // 格式不对就当没带。脏串塞进日期/时间选择器只会显示成空的或乱的，比不填更骗人。
+  const prefillDate = String(query?.date ?? '')
+  if (/^\d{4}-\d{2}-\d{2}$/.test(prefillDate)) date.value = prefillDate
+  const prefillTime = String(query?.time ?? '')
+  if (/^\d{2}:\d{2}$/.test(prefillTime)) time.value = prefillTime
+
+  const rawPayload = String(query?.payload ?? '')
+  if (rawPayload) {
+    let parsed: Record<string, unknown> | null = null
+    try {
+      const maybe = JSON.parse(rawPayload)
+      if (maybe && typeof maybe === 'object' && !Array.isArray(maybe)) {
+        parsed = maybe as Record<string, unknown>
+      }
+    } catch {
+      // 负载坏了就只丢负载：类型已经选下去了，表单照常能填。
+      parsed = null
+    }
+    if (parsed) {
+      // 只回填界面上有的栏（fields 是选了类型才有的 computed）。模型说了一栏
+      // 界面没有的东西，给人看一个填不进去、又不会被提交的值，比不说更糟。
+      for (const field of fields.value) {
+        const value = parsed[field.name]
+        if (typeof value === 'string' || typeof value === 'number') {
+          values[field.name] = String(value)
+        }
+      }
+    }
+  }
 })
 
 /**

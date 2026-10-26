@@ -4,3 +4,4 @@
 export * from './event-types'
 export * from './api-types'
 export * from './reminder-recurrence'
+export * from './assistant-types'

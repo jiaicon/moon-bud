@@ -323,6 +323,61 @@ onLoad(async (query) => {
   const id = String(query?.id ?? '')
   // 导航栏是 pages.json 里写死的"提醒"，编辑时不改口会让人以为在新增一条。
   uni.setNavigationBarTitle({ title: id ? '编辑提醒' : '新建提醒' })
+  // ---- 助手预填：「说一句话」换成提醒草稿后跳进来时带的那几个参数 ----
+  // 这一段只服务新建那一路；编辑在下面 return 之后自己从服务端取值，两边不互相盖。
+  const askedTitle = String(query?.title ?? '')
+  // 截到 50：标题栏的 maxlength 就是 50，模型给 80 字时不截会在保存那一刻静默少字。
+  if (askedTitle) title.value = askedTitle.slice(0, 50)
+  const askedDate = String(query?.date ?? '')
+  if (/^\d{4}-\d{2}-\d{2}$/.test(askedDate)) date.value = askedDate
+  const askedTime = String(query?.time ?? '')
+  if (/^\d{2}:\d{2}$/.test(askedTime)) time.value = askedTime
+  const askedRrule = String(query?.rrule ?? '')
+  if (askedRrule) {
+    // 周期用编辑那一路同一把尺子量回来（parseRruleForUi），不自拆字符串：两套拆法必然漂移。
+    const parsed = parseRruleForUi(askedRrule)
+    // 量不出来就只留上面那个钟点，周期档位停在原样——把人写成"每天"是谎报。
+    if (parsed) {
+      isRecurring.value = true
+      presetKey.value = parsed.key
+      customKind.value = parsed.kind
+      everyN.value = String(parsed.n ?? 2)
+      weekday.value = parsed.weekday ?? 0
+      // 「每天早 8 点」这类草稿只有 rrule、没有 dueAtWallClock，url 里不带 date/time：
+      // 钟点就得从规则里读回来。不读的话这一格停在打开页面的那一刻，保存又按它重拼规则，
+      // 提醒从此永远在那个钟点响。补零两位和编辑那一路同一个口径。
+      time.value = `${String(parsed.hour).padStart(2, '0')}:${String(parsed.minute).padStart(2, '0')}`
+    }
+  }
+  const askedChildId = String(query?.childId ?? '')
+  // 只认这一家的孩子：深链接上带一个陌生 id，表单会显示"已选中"，而记录挂在一个不相干的孩子身上。
+  if (askedChildId && children.value.some((c) => c.id === askedChildId)) childId.value = askedChildId
+  const askedEventType = String(query?.eventType ?? '')
+  if (isEventType(askedEventType)) {
+    actionType.value = askedEventType
+    // 只填动作类型和负载，不碰 storedType/storedPayload：那是"上次存好的那一份"，新建时不该有。
+    const rawAction = String(query?.actionPayload ?? '')
+    if (rawAction) {
+      let parsed: Record<string, unknown> | null = null
+      try {
+        const maybe = JSON.parse(rawAction)
+        if (maybe && typeof maybe === 'object' && !Array.isArray(maybe)) {
+          parsed = maybe as Record<string, unknown>
+        }
+      } catch {
+        parsed = null
+      }
+      if (parsed) {
+        // 只回填界面上有的栏；数字也按字符串存，和手输那一栏、buildActionPayload 同一口径。
+        for (const field of actionFields.value) {
+          const value = parsed[field.name]
+          if (typeof value === 'string' || typeof value === 'number') {
+            actionValues[field.name] = String(value)
+          }
+        }
+      }
+    }
+  }
   if (!id) return
   reminderId.value = id
   try {

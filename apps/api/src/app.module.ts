@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { APP_GUARD } from '@nestjs/core'
 import { ScheduleModule } from '@nestjs/schedule'
+import { AssistantModule } from './assistant/assistant.module'
 import { AuthModule } from './auth/auth.module'
 import { JwtAuthGuard } from './auth/jwt-auth.guard'
 import { ChildrenModule } from './children/children.module'
@@ -35,6 +36,7 @@ import { RemindersModule } from './reminders/reminders.module'
     DevicesModule,
     PushModule,
     NotificationsModule,
+    AssistantModule,
   ],
   providers: [
     // 全局注册：新增路由默认受保护，忘记加守卫不会变成漏洞。

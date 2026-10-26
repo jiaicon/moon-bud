@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { isFaithfulRrule } from '@moonbud/shared'
 import { buildRruleFromUi, parseRruleForUi, RRULE_PRESETS } from '../rrule-presets'
 
 describe('rrule 预设', () => {
@@ -78,5 +79,49 @@ describe('rrule 预设', () => {
     expect(parseRruleForUi(null)).toBeNull()
     expect(parseRruleForUi('')).toBeNull()
     expect(parseRruleForUi('FREQ=HOURLY;INTERVAL=6')).toBeNull()
+  })
+
+  /**
+   * 助手侧的 isFaithfulRrule（"界面摆不摆得出来"）和这里的 parse/build 是同一把尺子的两端。
+   * 两份判据各写各的迟早漂移，所以钉住不变量：凡是它放行、以及凡是这里读不回原样的，
+   * 两边必须给出同一个说法。
+   */
+  it('shared 放行的规则这里都能读回原样，读不回的 shared 都挡住', () => {
+    const samples = [
+      'FREQ=DAILY;BYHOUR=08;BYMINUTE=00',
+      'FREQ=DAILY;INTERVAL=3;BYHOUR=07;BYMINUTE=30',
+      'FREQ=WEEKLY;BYDAY=WE;BYHOUR=20;BYMINUTE=30',
+      'FREQ=MONTHLY;BYMONTHDAY=1;BYHOUR=09;BYMINUTE=00',
+      // 助手不补零也过得了那一关，这里同样要读得回来。
+      'FREQ=DAILY',
+      'FREQ=DAILY;INTERVAL=2',
+      'FREQ=WEEKLY;BYDAY=MO',
+      'FREQ=MONTHLY;BYMONTHDAY=1',
+    ]
+    for (const sample of samples) {
+      expect(isFaithfulRrule(sample), `${sample} 应当被放行`).toBe(true)
+      const parsed = parseRruleForUi(sample)
+      expect(parsed, `${sample} 读不回表单`).not.toBeNull()
+      if (!parsed) continue
+      // 拼回去再读一次，档位、钟点、间隔、星期都不许在往返里变形。
+      const rebuilt = parseRruleForUi(buildRruleFromUi(parsed))
+      expect(rebuilt, `${sample} 拼回去读不回`).not.toBeNull()
+      expect(rebuilt).toEqual(parsed)
+    }
+  })
+
+  it('shared 挡掉的那几种，正是这里会读成近似的那几种', () => {
+    // 'BYDAY=MO,WE' 在这里只认第一个日子：屏幕写"每周一"、服务端周一周三都响。
+    expect(isFaithfulRrule('FREQ=WEEKLY;BYDAY=MO,WE;BYHOUR=20;BYMINUTE=30')).toBe(false)
+    expect(parseRruleForUi('FREQ=WEEKLY;BYDAY=MO,WE;BYHOUR=20;BYMINUTE=30')).toMatchObject({
+      key: 'weekly',
+      weekday: 0,
+    })
+    // 'BYMONTHDAY=15' 在这里整个被忽略：预设标签却钉死写着"每月 1 日"。
+    expect(isFaithfulRrule('FREQ=MONTHLY;BYMONTHDAY=15;BYHOUR=08;BYMINUTE=00')).toBe(false)
+    expect(parseRruleForUi('FREQ=MONTHLY;BYMONTHDAY=15;BYHOUR=08;BYMINUTE=00')).toMatchObject({ key: 'monthly' })
+    // 周频带 INTERVAL：这里读成"每周一"，实际每两周。
+    expect(isFaithfulRrule('FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;BYHOUR=08;BYMINUTE=00')).toBe(false)
+    expect(parseRruleForUi('FREQ=WEEKLY;INTERVAL=2;BYDAY=MO;BYHOUR=08;BYMINUTE=00')).toMatchObject({ key: 'weekly' })
   })
 })

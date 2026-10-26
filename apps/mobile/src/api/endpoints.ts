@@ -1,4 +1,5 @@
 import type {
+  AssistantParseDto,
   AuthResponse,
   ChildDto,
   DeviceDto,
@@ -175,6 +176,12 @@ export const devicesApi = {
   unregister: (clientId: string) =>
     apiRequest<void>('/devices/push-client', { method: 'DELETE', data: { clientId } }),
   list: () => apiRequest<DeviceDto[]>('/devices/push-clients'),
+}
+
+/** 一句话记录：服务端把原话换成草稿，客户端只负责把草稿搬进表单。 */
+export const assistantApi = {
+  parse: (text: string) =>
+    apiRequest<AssistantParseDto>('/assistant/parse', { method: 'POST', data: { text } }),
 }
 
 export type { ThemePresetId }

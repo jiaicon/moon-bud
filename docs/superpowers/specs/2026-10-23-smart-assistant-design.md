@@ -244,3 +244,40 @@ model Event {
 - 断网点「记一笔」→ 出箱 → 恢复网络后重放，`fromReminderId` 要跟着走。
 - 同一提醒连续两枪（重复提醒每天一次）不能互相覆盖出处。
 - 模型接口 429 与超时的客户端表现必须不同于一句"失败了"。
+
+## 二期落地时的补记（2026-10-26，实现与文档不同的地方以这一节为准）
+
+- **模型名以 env 为准**：`DEEPSEEK_MODEL` 默认 `deepseek-flash`，代码里只是兜底。
+  模型名是上游会改的东西，写死等于每改一次发一次版；上游拒名时改服务器 `.env` 一个值。
+  同理 `DEEPSEEK_BASE_URL`（默认 `https://api.deepseek.com`）。
+  `DEEPSEEK_API_KEY` 空（trim 后）时装配的是 `NoopAssistantProvider`，启动日志写
+  「助手通道：未配置 DEEPSEEK_API_KEY，一句话记录不可用」——**没有密钥不是崩溃，是一个明确的 503**。
+- **节流的默认值与实现**：每用户每分钟 **6** 次（`ASSISTANT_RATE_LIMIT`，`<1` 或非法值退回 6），
+  实现是**单容器进程内的滑动窗口 Map**，不建表：建表要迁移、要进 e2e 的 TRUNCATE 名单，
+  代价是重启清零而收益是零（这一条防的是白嫖算力，不是审计）。
+  超出回 429 + `{ code: 'ASSISTANT_RATE_LIMITED', message: '说得有点快了，等一分钟再试' }`。
+- **负载整份清空，不逐栏裁**：模型给的 `payload`/`actionPayload` 过不了 zod 时，
+  这一份置成 `{}` 并在 `dropped` 里记下是哪一份，而**不是**逐栏挑出能留的。
+  逐栏要在 shared 里再维护一张字段清单，而 `event-types.ts` 已经是那张清单——两份清单迟早对不上
+  （一期终审那一串 bug 就是两份判定不一致的产物）。
+- **错误码表定下来**（文档原来只写"明确错误码"）：429 `ASSISTANT_RATE_LIMITED`、
+  503 `ASSISTANT_UNAVAILABLE`、502 `ASSISTANT_TIMEOUT` / `ASSISTANT_BAD_OUTPUT`，
+  响应体统一 `{ code, message }`，message 是中文一句，客户端直接念它
+  （`ApiRequestError.message`），客户端**不重跑 zod**、只读服务端给出的结论。
+- **`dropped` 只用于首页那句提示，不进跳转 URL**：表单自己会用 `actionHint` 说实话
+  （一期 F5 定的口径），再加一个"预填状态"参数就是第二份真相。
+- **信封是"恰好一个槽"**（终审补）：`intent` 说了 event 就必须只带 event——两个槽都填、
+  或 unknown 还带负载，都在共享契约这一层判坏。客户端按 `intent` 分支取负载，
+  多带的那一半会静不吭声地消失而 `dropped` 是空的，屏幕上那句"已按你说的话填好"就成了谎话。
+- **周期规则只允许界面摆得出来的那几种**（终审补，代码是 `isFaithfulRrule`）：
+  `FREQ=DAILY[;INTERVAL=n]`、`FREQ=WEEKLY;BYDAY=单个日子`、`FREQ=MONTHLY;BYMONTHDAY=1`，
+  外加 `BYHOUR/BYMINUTE`。一周挑几天、`FREQ=HOURLY`、每月 15 号这类一律判坏。
+  理由：客户端的 `parseRruleForUi` 只认第一个 BYDAY、忽略 INTERVAL/BYMONTHDAY，
+  而服务端排期用的是原样那份规则——屏幕写"每周一"、实际周一周三都响。
+  提示词里的例子和这把尺子由同一个测试钉住，两边不许各写各的。
+- **`errors` 只进日志，而且日志里没有用户原话**（终审补）：净化失败时给出的每条是
+  `栏目: 错误码`，只有我们自己写的那句中文（custom issue）带文字。zod 的默认文案会把
+  收到的原值念出来（`received '刚刚瓶喂 120 毫升'`），而那句话是要留在手机里的东西。
+- **周期草稿的钟点只能从 `rrule` 读回来**（终审补）：`RECURRING` 的 `dueAtWallClock` 合法地为 null，
+  跳转 URL 因此没有 `date/time`；表单的"几点"那一格必须用 `parseRruleForUi` 的
+  `hour/minute` 覆盖，否则它停在打开页面的那一刻，而保存又按它重拼规则——提醒永远在那个钟点响。

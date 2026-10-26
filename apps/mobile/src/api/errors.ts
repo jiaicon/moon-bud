@@ -33,6 +33,7 @@ const STATUS_COPY: Record<number, string> = {
   403: '没有权限这样做',
   404: '要找的内容不在了',
   409: '和家人刚做的改动冲突了，刷新一下再试',
+  429: '说得有点快了，等一分钟再试',
 }
 
 function readMessage(source: unknown): string | undefined {

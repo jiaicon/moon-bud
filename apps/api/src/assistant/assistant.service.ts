@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config'
 import {
   isSupportedTimezone,
   sanitizeAssistantDraft,
+  type AssistantIntentHint,
   type AssistantParseDto,
 } from '@moonbud/shared'
 import { PrismaService } from '../prisma/prisma.service'
@@ -39,7 +40,11 @@ export class AssistantService {
     return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : DEFAULT_RATE_LIMIT
   }
 
-  async parse(userId: string, text: string): Promise<AssistantParseDto> {
+  async parse(
+    userId: string,
+    text: string,
+    intentHint?: AssistantIntentHint,
+  ): Promise<AssistantParseDto> {
     const now = new Date()
     const verdict = tryConsume(this.window, userId, now, this.limit)
     if (!verdict.allowed) {
@@ -58,7 +63,7 @@ export class AssistantService {
 
     let raw: unknown
     try {
-      raw = await this.provider.parse({ userId, text, timezone, now })
+      raw = await this.provider.parse({ userId, text, timezone, now, intentHint })
     } catch (err) {
       throw this.toHttp(err, text)
     }

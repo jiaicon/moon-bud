@@ -14,6 +14,12 @@ export const ASSISTANT_TEXT_MAX_LENGTH = 200
 
 export type AssistantIntent = 'event' | 'reminder' | 'unknown'
 
+/**
+ * 客户端替人确认过的那一个意图（面板里问"是要记一笔，还是设提醒"，点一下就带来这个）。
+ * 不含 unknown：那是"没听懂"，不是一句确认。
+ */
+export type AssistantIntentHint = Extract<AssistantIntent, 'event' | 'reminder'>
+
 export interface AssistantEventDraft {
   type: EventType
   /** `YYYY-MM-DDTHH:mm`，按账号时区解释。null 表示模型没说时间，留给人补。 */

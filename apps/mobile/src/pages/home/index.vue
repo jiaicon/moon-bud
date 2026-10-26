@@ -2,13 +2,12 @@
 import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh, onShow } from '@dcloudio/uni-app'
 import { EVENT_TYPES, type EventDto } from '@moonbud/shared'
+import AskSheet from '../../components/AskSheet.vue'
 import ChildSwitcher from '../../components/ChildSwitcher.vue'
 import FamilySwitcher from '../../components/FamilySwitcher.vue'
 import GuestGuide from '../../components/GuestGuide.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
-import { assistantTarget } from '../../assistant/draft-target'
-import { ApiRequestError } from '../../api/errors'
-import { assistantApi, eventsApi, remindersApi } from '../../api/endpoints'
+import { eventsApi, remindersApi } from '../../api/endpoints'
 import { EVENT_TYPE_META } from '../../events/event-fields'
 import { buildTodaySummary, type TodaySummary } from '../../events/summary'
 import { buildGuestOverviewRows, buildOverviewRows, decideHomeView } from './home-view'
@@ -174,41 +173,9 @@ const guestRows = computed(() => buildGuestOverviewRows())
 const overdueCount = computed(() => summary.value?.overdueCount ?? 0)
 
 // ---- 说一句话 ----
-// 话交给服务端换成草稿，这一屏只做两件事：把人搬进表单，以及没说清时不装懂。
-const askText = ref('')
-const asking = ref(false)
-
-async function submitAssistant(): Promise<void> {
-  if (!askText.value.trim() || asking.value) return
-  const text = askText.value.trim()
-  asking.value = true
-  try {
-    const result = await assistantApi.parse(text)
-    const target = assistantTarget(result, {
-      familyId: familyId.value,
-      // 只跟着当前孩子走：草稿里没有"孩子"这个概念，不替人猜一个。
-      childId: child.value?.id ?? null,
-    })
-    if (target.kind === 'unknown') {
-      uni.showToast({ title: '这句我没看懂，手动记一下', icon: 'none' })
-      return
-    }
-    // 服务端丢掉的字段要说出来，否则人会以为表单里已经填全了。
-    if (result.dropped.length > 0) {
-      uni.showToast({ title: '有些字段没填上，表单里补一下', icon: 'none' })
-    }
-    uni.navigateTo({ url: target.url })
-    askText.value = ''
-  } catch (err) {
-    // 429、超时这类服务端已经写好了一句话，用它；没有就说不看懂，别静默。
-    uni.showToast({
-      title: err instanceof ApiRequestError ? err.message : '这句我没看懂，手动记一下',
-      icon: 'none',
-    })
-  } finally {
-    asking.value = false
-  }
-}
+// 解析、判断、交接、跳转整块都在 AskSheet 里：记录页和提醒页挂的是同一个面板。
+// 这一屏只留"要不要把面板打开"和"草稿落在哪个孩子身上"——后者只有这里知道。
+const askOpen = ref(false)
 </script>
 
 <template>
@@ -285,19 +252,10 @@ async function submitAssistant(): Promise<void> {
       </view>
 
       <template v-else>
-        <!-- 一句话记录：只有既登了进来又有家庭又有孩子的人才看得见这一格。 -->
-        <view class="ask">
-          <input
-            v-model="askText"
-            class="ask__input"
-            maxlength="200"
-            placeholder="说一句话，如：刚刚瓶喂 120 毫升"
-            confirm-type="done"
-            @confirm="submitAssistant"
-          />
-          <view class="ask__go" :class="{ 'ask__go--busy': asking }" @click="submitAssistant">
-            <text class="ask__go-label">{{ asking ? '在看…' : '记下' }}</text>
-          </view>
+        <!-- 一句话记录：只有既登了进来又有家庭又有孩子的人才看得见这一颗。
+             它和记录页/提醒页那颗是同一个东西、同一个样式——三处长得一样，人才认得出是同一个能力。 -->
+        <view class="ask-pill" @click="askOpen = true">
+          <text class="ask-pill__label">说一句话</text>
         </view>
 
         <view v-if="overdueCount > 0" class="alert" @click="goReminders">
@@ -331,6 +289,9 @@ async function submitAssistant(): Promise<void> {
         </view>
       </template>
     </view>
+
+    <!-- 三页共用的同一个面板；首页只交代"草稿落在哪个孩子身上"。 -->
+    <ask-sheet v-model:open="askOpen" :child-id="child?.id ?? null" />
   </theme-root>
 </template>
 
@@ -390,41 +351,24 @@ async function submitAssistant(): Promise<void> {
   text-align: center;
 }
 
-.ask {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 16rpx;
-  padding: 12rpx 12rpx 12rpx 26rpx;
+/* 与 event-list / reminder-list 那颗是同一份样式，只差 bottom 一行：首页没有 FAB，不用让位。 */
+.ask-pill {
+  position: fixed;
+  right: 40rpx;
+  bottom: calc(var(--window-bottom) + 40rpx);
+  height: 72rpx;
+  padding: 0 28rpx;
   border-radius: 999rpx;
-  background-color: var(--mb-color-surface);
-  border: 1rpx solid var(--mb-color-border);
-}
-
-.ask__input {
-  flex: 1;
-  /* 宿主不自带高度就会被 uni-app 定成 1.4em，inner 压成 1px：字打进去看不见（见 input-surface 门禁）。 */
-  height: 68rpx;
-  font-size: 28rpx;
-  color: var(--mb-color-text-primary);
-}
-
-.ask__go {
+  background-color: var(--mb-color-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 68rpx;
-  padding: 0 32rpx;
-  border-radius: 999rpx;
-  background-color: var(--mb-color-primary);
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.18);
 }
 
-.ask__go--busy {
-  opacity: 0.55;
-}
-
-.ask__go-label {
+.ask-pill__label {
   font-size: 26rpx;
+  font-weight: 600;
   color: var(--mb-color-on-primary);
 }
 

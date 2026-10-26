@@ -18,6 +18,6 @@ export class AssistantController {
   @Post('parse')
   @HttpCode(200)
   parse(@CurrentUser() user: AuthUser, @Body() dto: ParseAssistantDto): Promise<AssistantParseDto> {
-    return this.assistant.parse(user.id, dto.text)
+    return this.assistant.parse(user.id, dto.text, dto.intentHint)
   }
 }

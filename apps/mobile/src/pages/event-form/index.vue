@@ -9,6 +9,8 @@ import {
 } from '@moonbud/shared'
 import { onLoad } from '@dcloudio/uni-app'
 import { blockGuestDeepLink } from '../../guest/deep-link'
+import { askBannerCopy } from '../../assistant/ask-flow'
+import { takeEventDraft } from '../../assistant/draft-handoff'
 import { computed, reactive, ref } from 'vue'
 import { eventsApi } from '../../api/endpoints'
 import { EVENT_TYPE_META, fieldsFor, NON_BLOCKING_NOTICES, type FieldSpec } from '../../events/event-fields'
@@ -43,6 +45,7 @@ const values = reactive<Record<string, string>>({})
 const errors = reactive<Record<string, string>>({})
 const note = ref('')
 const duplicateHint = ref('')
+const askBanner = ref<string | null>(null)
 const saving = ref(false)
 
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
@@ -180,32 +183,28 @@ onLoad(async (query) => {
     endTime.value = state.endTime
     return
   }
-  if (isEventType(requested)) chooseType(requested)
+  // ---- 助手预填：「说一句话」换成的那份草稿 ----
+  // 草稿不走 url：App 端 navigateTo 会把 query 的值再编码一遍，中文到手机上就是 %E5%AE%9D…
+  // （见 assistant/draft-handoff.ts）。取一次就没了，编辑那一路在上面已经 return，碰不到它。
+  const asked = takeEventDraft()
+  if (asked?.childId) targetChildId.value = asked.childId
+  // 类型要在选下去之前定好：宫格、要显示哪些栏、防重复提示都按它算。
+  const nextType = asked ? asked.event.type : requested
+  if (isEventType(nextType)) chooseType(nextType)
 
-  // ---- 助手预填：「说一句话」换成草稿后跳进来时带的三个参数 ----
-  // 格式不对就当没带。脏串塞进日期/时间选择器只会显示成空的或乱的，比不填更骗人。
-  const prefillDate = String(query?.date ?? '')
-  if (/^\d{4}-\d{2}-\d{2}$/.test(prefillDate)) date.value = prefillDate
-  const prefillTime = String(query?.time ?? '')
-  if (/^\d{2}:\d{2}$/.test(prefillTime)) time.value = prefillTime
+  if (asked) {
+    askBanner.value = askBannerCopy(asked.dropped)
+    // 格式不对就当没带。脏串塞进日期/时间选择器只会显示成空的或乱的，比不填更骗人。
+    const [prefillDate = '', prefillTime = ''] = (asked.event.occurredAtWallClock ?? '').split('T')
+    if (/^\d{4}-\d{2}-\d{2}$/.test(prefillDate)) date.value = prefillDate
+    if (/^\d{2}:\d{2}$/.test(prefillTime)) time.value = prefillTime
 
-  const rawPayload = String(query?.payload ?? '')
-  if (rawPayload) {
-    let parsed: Record<string, unknown> | null = null
-    try {
-      const maybe = JSON.parse(rawPayload)
-      if (maybe && typeof maybe === 'object' && !Array.isArray(maybe)) {
-        parsed = maybe as Record<string, unknown>
-      }
-    } catch {
-      // 负载坏了就只丢负载：类型已经选下去了，表单照常能填。
-      parsed = null
-    }
-    if (parsed) {
+    const rawPayload = asked.event.payload
+    if (rawPayload && Object.keys(rawPayload).length > 0) {
       // 只回填界面上有的栏（fields 是选了类型才有的 computed）。模型说了一栏
       // 界面没有的东西，给人看一个填不进去、又不会被提交的值，比不说更糟。
       for (const field of fields.value) {
-        const value = parsed[field.name]
+        const value = rawPayload[field.name]
         if (typeof value === 'string' || typeof value === 'number') {
           values[field.name] = String(value)
         }
@@ -324,6 +323,12 @@ const goBack = () => stepBack()
 <template>
   <theme-root>
     <view class="form">
+      <!-- 这句话是助手唯一一次当着人的面开口：它得说清这份草稿是从"你刚说的那一句"来的，
+           并且把没填上的栏一起说了——格子还空着时不许报喜。 -->
+      <view v-if="askBanner" class="ask-banner">
+        <text class="ask-banner__text">{{ askBanner }}</text>
+      </view>
+
       <view v-if="!type" class="form__grid">
         <text class="form__title">记什么</text>
         <view class="grid">
@@ -487,6 +492,21 @@ const goBack = () => stepBack()
   flex-direction: column;
   gap: 28rpx;
   margin-top: 8rpx;
+}
+
+.ask-banner {
+  /* .form 不是 flex column，没有 gap 可用：这条自己留出与下面那格的间距。 */
+  margin-bottom: 24rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 16rpx;
+  background-color: var(--mb-color-surface-alt);
+  border-left: 6rpx solid var(--mb-color-info);
+}
+
+.ask-banner__text {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: var(--mb-color-text-primary);
 }
 
 .hint {

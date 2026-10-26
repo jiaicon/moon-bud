@@ -52,4 +52,37 @@ describe('buildAssistantMessages', () => {
       expect(isFaithfulRrule(example)).toBe(true)
     }
   })
+
+  it('人已确认意图时，把这一条当指令告诉模型；没确认时不许出现', () => {
+    // 面板里那句"是要记一笔，还是设提醒？"点一下就是一个 intentHint。不把它说给模型，
+    // 这一趟重发就是原地打转：同一句话、同一个 unknown、同一句"没看懂"。
+    const [hinted] = buildAssistantMessages({
+      text: '宝宝该喂奶了',
+      timezone: 'Asia/Shanghai',
+      now,
+      intentHint: 'reminder',
+    })
+    expect(hinted.content).toContain('人已确认')
+    expect(hinted.content).toContain('reminder')
+    const [eventHinted] = buildAssistantMessages({
+      text: '宝宝该喂奶了',
+      timezone: 'Asia/Shanghai',
+      now,
+      intentHint: 'event',
+    })
+    expect(eventHinted.content).toContain('人已确认')
+
+    const [plain] = buildAssistantMessages({ text: '宝宝该喂奶了', timezone: 'Asia/Shanghai', now })
+    expect(plain.content).not.toContain('人已确认')
+  })
+
+  it('确认过意图仍然不许它替人编内容：那句"不要猜"必须还在', () => {
+    const [hinted] = buildAssistantMessages({
+      text: '刚刚那个',
+      timezone: 'Asia/Shanghai',
+      now,
+      intentHint: 'event',
+    })
+    expect(hinted.content).toContain('不要猜')
+  })
 })

@@ -1,4 +1,4 @@
-import { EVENT_TYPES, eventPayloadSchemas, wallClockAt } from '@moonbud/shared'
+import { EVENT_TYPES, eventPayloadSchemas, wallClockAt, type AssistantIntentHint } from '@moonbud/shared'
 
 export interface ChatMessage {
   role: 'system' | 'user'
@@ -70,6 +70,8 @@ export interface BuildAssistantMessagesInput {
   text: string
   timezone: string
   now: Date
+  /** 人在界面上确认过的意图；没有就是没确认，模型照原话判。 */
+  intentHint?: AssistantIntentHint
 }
 
 /**
@@ -98,6 +100,16 @@ export function buildAssistantMessages(input: BuildAssistantMessagesInput): Chat
     wallClockLine(input.timezone, input.now),
     '',
     '【缺信息怎么办】认不出意图就回 unknown。意图清楚但某栏没说就留 null 或空对象，**不要猜**，也不要替用户补一个"看起来合理"的值——这份草稿会直接填进表单，猜错的东西用户看不出来就会存进数据库。',
+    ...(input.intentHint
+      ? [
+          '',
+          // 反问那一步的后半句：人已经点过"记一笔/设提醒"，这一趟再回 unknown 就是原地打转。
+          // 只锁 intent，内容仍照原话填——确认了"要设提醒"不等于确认了"晚上 8 点"。
+          `【人已确认】这一句的意图人已确认：${
+            input.intentHint === 'event' ? '记一笔' : '设提醒'
+          }，intent 必须是 "${input.intentHint}"，另一个槽留 null。上面那句"不要猜"照旧管用：栏里的内容还是只按原话填，没说就留 null。`,
+        ]
+      : []),
   ].join('\n')
 
   return [

@@ -50,9 +50,11 @@ function verticalPadding(decls: string): string | null {
 }
 
 describe('裸 <input> 的样式约定', () => {
-  const files = vueFiles(join(__dirname, '..')).filter((file) =>
-    /<input[\s>]/.test(readFileSync(file, 'utf8')),
-  )
+  // 页面和共用组件都算：AskSheet 那类面板里的输入框一旦踩了这个坑，
+  // 三个页面会同时"看着能输、其实打不进字"，比单个页面更贵。
+  const files = ['../../pages', '../../components']
+    .flatMap((dir) => vueFiles(join(__dirname, dir)))
+    .filter((file) => /<input[\s>]/.test(readFileSync(file, 'utf8')))
 
   it('仓库里确实扫到了裸 input（否则这条门禁是空转）', () => {
     expect(files.length).toBeGreaterThanOrEqual(4)

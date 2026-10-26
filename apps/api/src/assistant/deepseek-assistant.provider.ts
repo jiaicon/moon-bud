@@ -54,7 +54,12 @@ export class DeepseekAssistantProvider implements AssistantProvider {
   async parse(req: AssistantRequest): Promise<unknown> {
     if (this.apiKey === '') throw new AssistantUnavailableError()
 
-    const messages = buildAssistantMessages({ text: req.text, timezone: req.timezone, now: req.now })
+    const messages = buildAssistantMessages({
+      text: req.text,
+      timezone: req.timezone,
+      now: req.now,
+      intentHint: req.intentHint,
+    })
 
     let res: Response
     try {

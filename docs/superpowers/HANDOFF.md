@@ -1063,12 +1063,13 @@ Android 侧要重出包才带得上这一轮（HBuilderX 发行 → 原生 App-�
 
 ---
 
-## 助手二期（首页「说一句话」）：代码已进工作区，尚未提交、尚未上线（2026-10-26）
+## 助手二期（首页「说一句话」）：已提交上线（`12cad40`），真机那一条乱码的修法还在工作区（2026-10-26）
 
 `POST /assistant/parse`（DeepSeek 把一句话换成草稿 → zod 净化 → 节流）与首页那一格、
-两个表单吃预填，全部实现并测绿：shared 64 例、api e2e 24 套件 / 221 例、mobile 109 文件 / 781 例，
-两个 typecheck 0 错。H5 上验过的是**没配密钥的那一套**（见 BUILD.md 第 10 节的第 5 步），
-"模型真听懂"这一条**没有任何人看过**。
+两个表单吃预填，全部实现并测绿：shared 64 例、api e2e 24 套件 / 221 例、mobile 110 文件 / 792 例，
+两个 typecheck 0 错。服务端与 H5 已经部署到 https://yueya.iconmen.top（服务器 `.env` 里
+`DEEPSEEK_API_KEY=` 那行还是空的，所以上线的是**没配密钥的那一套**，见 BUILD.md 第 10 节的第 5 步），
+"模型真听懂"这一条**没有任何人看过**——直到用户在小米手机上试了一次，试出来的是乱码（见本节末）。
 
 ### 上线前只有人能做到的那两件
 
@@ -1088,12 +1089,12 @@ Android 侧要重出包才带得上这一轮（HBuilderX 发行 → 原生 App-�
   建表要迁移、要进 e2e 的 TRUNCATE 名单，代价是重启清零，收益是零。
 - **模型给的负载整份清空，不逐栏裁**：逐栏要在 shared 里再维护一张字段清单，而 `event-types.ts`
   已经是那张清单，两份清单迟早对不上（一期终审那一串 bug 就是两份判定不一致的产物）。
-- **`dropped` 只用于首页那句提示，不进 URL**：表单自己会用 `actionHint` 说实话（一期 F5 定的口径），
+- **`dropped` 只用于首页那句提示，不进给表单的交接**：表单自己会用 `actionHint` 说实话（一期 F5 定的口径），
   再造一个"预填状态"参数就是第二份真相。
 
 ### 真机与验收
 
-BUILD.md 第 10 节那 7 步要在服务器配好密钥、下一次云打包之后跑。
+BUILD.md 第 10 节那 9 步要在服务器配好密钥、下一次云打包之后跑。第 8 步是只有真机验得出来的那一条。
 
 ### 终审那一趟查出来的五条（已全部修掉，每条都有亲眼看到的 RED→GREEN）
 
@@ -1107,4 +1108,116 @@ BUILD.md 第 10 节那 7 步要在服务器配好密钥、下一次云打包之�
 - **I-3 提醒那一路的 URL 不带孩子**：带动作的提醒没归属，服务端直接 400——表单看着填好了，按下保存才被挡。
 - **I-4 提示词教的正是界面摆不出来的那种规则**（`BYDAY=MO,WE`）：`parseRruleForUi` 只认第一个日子，
   屏幕写"每周一"而服务端周一周三都响。现在共享契约里有一把 `isFaithfulRrule`，
-  提示词的例子和 `parseRruleForUi`/`buildRruleFromUi` 由同一个测试钉在一起；多日的说法改成回 unknown。
+  提示词的例子和 `parseRruleForUi`/`buildRruleForUi` 由同一个测试钉在一起；多日的说法改成回 unknown。
+
+### 用户在小米手机上试出来的那一条：预填的标题是乱码（2026-10-26 下午，已修，代码在工作区）
+
+现象：新建提醒的标题那一格显示 `%E5%AE%9D%E5%AE%9D%E8%AF%A5%E7%9B…`。
+
+**根因是平台的不对称，不是编码写错**：App 端每一个 `navigateTo` 都会把 url 上 query 的**值**
+再 `encodeURIComponent` 一遍（`@dcloudio/uni-app-plus` 的 `encodeQueryString`，
+`dist/uni.runtime.esm.js:12316`，由 `createNormalizeUrl` 在 `:12476` 调用），而 `onLoad` 拿到的
+options 只解一层（uni-shared 的 `parseQuery`）；H5 因为 vue-router 的 `parseQuery` 之外还解一次
+（`decodedQuery`），所以在浏览器里**永远是对的**。中文一进 url，到 App 上就是百分号串。
+
+**修法是把 url 从这条链路上去掉**，不是"按平台多解一次"（`#ifdef APP-PLUS` 里补 decode 只治标题，
+漏掉负载里的中文和 emoji；base64 则要赌 App 服务层有没有 `atob`/`TextDecoder`，没验过）：
+新增 `apps/mobile/src/assistant/draft-handoff.ts`，首页 `stageDraft({ draft, childId })` 存进
+storage，表单 `onLoad` 用 `takeEventDraft()` / `takeReminderDraft()` 取一次即删，
+`assistantTarget()` 返回的 url 只剩页名。三条口径（都有测试钉着）：
+
+- 草稿的 `intent` 与当前页不匹配时**不消费**，留给另一张表单；
+- 存放超过 **10 分钟**当过期，删掉不用——否则第二天的新建会被昨天那句话预填；
+- 编辑那一路（url 带 `id`）**不取草稿**（reminder-form 是 `id ? null : take…`，event-form 在编辑
+  `return` 之后才取），预填不许盖编辑已存的值。
+
+顺带：孩子（`childId`）也搬进了交接，终审 I-3 那个"往 URL 加 childId"的修法跟着消失了；
+`familyId` 从交接里去掉（一次跳转里家庭不会变，是个拿不到的状态）。
+
+验证：mobile **110 文件 / 792 例全绿**（`draft-handoff.test.ts` 6 例是 RED→GREEN：先建测试文件时
+模块还不存在，收集阶段就红），`vue-tsc` 0 错。**H5 需要重新构建并替换 `/var/www/moonbud/h5`；
+App 那一路必须重新云打包才带得走这个修复**——装机的那一版仍是乱码版。
+
+## 助手存在感 v1：三个入口 + 一个面板 + 听不懂时原地反问（2026-10-26 下午，代码在工作区）
+
+用户那句「现在的存在感太低了」不是修辞：二期那一版把入口做成首页一栏带 placeholder 的输入框，
+**看得见的东西没人知道能用**。这一轮只做"让人真的用上它"这一件事，没有加新能力。
+
+### 改了哪四块
+
+- **一个面板，三处入口。** 新增 `apps/mobile/src/components/AskSheet.vue`（`u-popup` 底部弹层）：
+  输入框 + 三句例句 + 「在看…/记下」+ 听不懂时的那一行反问。**三处入口是同一颗右下角悬浮胶囊**
+  （`.ask-pill`，首页坐在 FAB 那一格 `bottom: calc(var(--window-bottom) + 40rpx)`，记录页与提醒页
+  在其上再让出一个 FAB 身位 `+ 108rpx + 16rpx`）——三处长得一样，人才认得出那是同一个能力；
+  首页那一版曾是内容区顶部的实心块，滚一下就没了，所以搬到右下角。
+  **调用→判 intent→交接→跳转只在这一处发生一次**，三个页面只负责"要不要开"和"当前是哪个孩子"。
+- **听不懂时不换页，原地问一句。** 之前 toast 完事，人什么也没得到。现在面板里出现
+  「这句我没能判断，您想让我做哪一件？」+「记一笔 / 设提醒」两个 chip，点一下把**同一句话**
+  带着 `intentHint` 再发一次。话不清空、面板不关。
+- **`intentHint` 是后端的一条新口子**（`POST /assistant/parse` 可选字段，只认 `event`/`reminder`）。
+  提示词里追加一段「【人已确认】…intent 必须是 X，另一个槽留 null」，而"没说就留 null"那句照旧管用——
+  人确认的是**意图**，不是替人编内容。DTO 用 `@ValidateIf((_o, v) => v !== undefined)` + `@IsIn`，
+  因为 `@IsOptional()` 会把 `null` 放过去，而 null 不是一次确认。
+- **横幅取代跳转前那句 toast。** `dropped` 现在随草稿进本地交接（`PickedEvent/PickedReminder.dropped`），
+  表单顶部那条（`.ask-banner`）用 `askBannerCopy(dropped)` 说实话：什么都没丢才允许说"填好了"。
+  编辑那一路拿不到横幅（event-form 在 `if (id)` 分支里 return，reminder-form 是 `id ? null : take…`）。
+
+### 这一轮定下来的口径（下期别推翻）
+
+- 例句是**功能清单**：`ASK_EXAMPLES` 恰好三句、≤30 字、两种意图各有覆盖，且不许出现
+  「今天喝了多少奶」这类这一期还答不出来的问句——点一句换不来东西，比没有例句更坏。
+- 入口对**游客不摆**（不是 gate 掉点击）：游客口径是点击静默、不弹窗，一个点开只会说"先登录"的入口
+  比没有入口更坏。列表页那颗胶囊与「＋」共用**同一个 `v-if`**，测试钉死了这一点；首页那颗只画在
+  ready 那一支（没登录、没家庭、没孩子都不摆）。
+- **三颗胶囊的样式只许差 `bottom` 一行**：`home-ask-entry.test.ts` 把首页与记录页的 `.ask-pill`
+  样式块抽出来、剥掉注释和 `bottom` 后逐字比对。三份复制的样式没人会记得同步改，
+  而"同一个能力的三个入口长得不一样"正是这一轮要治的病。
+- 面板的样式只用那 16 个主题令牌，测试逐个 `var(--mb-color-*)` 对着 `toCssVars(lightTokens)` 查——
+  拼错一个令牌在深色模式下就是"那块没有颜色"，而浅色看着一切正常。
+- `input-surface` 那条门禁**从只扫 pages 扩到也扫 components**：AskSheet 的输入框一开始写的就是
+  `padding: 20rpx 24rpx` 且不带高度，正好是 uni-app 把 `uni-input` 定成 `height:1.4em;overflow:hidden`
+  那个"打不进字"的坑。门禁只覆盖 pages 时它就这么溜过去了。
+
+### 验证（都是亲眼读过的输出）
+
+- mobile：**114 文件 / 825 例全绿**，`vue-tsc` 0 错。新增 5 个测试文件（`ask-flow` 7、`ask-sheet` 7、
+  `home-ask-entry` 7、`list-ask-pill` 8、`ask-banner` 8）+ `draft-handoff` +1，每一条都先看过 RED。
+  旧的 `home-ask-bar.test.ts` 删掉了：它钉的那 6 条里有 4 条整块搬进了 `ask-sheet.test.ts`，
+  剩下"只画在 ready 那一支""排在告警之前"折进 `home-ask-entry.test.ts`。
+- api：**24 套 / 226 例全绿**（`--runInBand`），其中 `assistant-prompt` 与 `assistant` 各加了
+  `intentHint` 的用例（有 hint 时提示词里有「人已确认」且「不要猜」还在；透传到 provider 的那一层；
+  `unknown`/空串/3/null 一律 400 且 `parse` 没被调用）。
+- shared：**4 文件 / 69 例全绿**（`AssistantIntentHint` 只是类型，无运行时代码）。
+- 首页/表单源码扫描里那些"页面不许碰 `assistantApi`""不许再出现 `有些字段没填上`"的钉，
+  都是这一轮加的：**入口越多的地方，越要把判定锁在一处**。
+- **本地 H5 真走了一遍**（2026-10-26 傍晚，用一次性假上游把 `DEEPSEEK_BASE_URL` 指到
+  `127.0.0.1:4999`，返回写死的草稿；走完即删，QA 账号与家庭已从本地库清掉）。亲眼读到的：
+  首页那颗 → 面板三句例句齐；点例句落进记一笔（喂奶 + 瓶喂高亮 + 奶量 120 + 今天 09:30 +
+  横幅「助手按你说的话填好了…」）；喂一份 payload 填不全的草稿 → 横幅换成
+  **「有些字段没填上，在下面补一下」** 且奶量格子确实是空的（第 9 步那条）；
+  「每天早 8 点提醒吃维D 400IU」→ 新建提醒：标题是**汉字**、重复/每天/08:00（从 `rrule` 读回来的）、
+  用药高亮、药品名与剂量齐、底部那句是「到点直接记…」；「今天心情不好」→ **不换页**，话留着，
+  面板里长出「记一笔 / 设提醒」；点「设提醒」→ 落到新建提醒且预填齐全（说明 `intentHint`
+  真的进到了提示词那一句）；记录页与提醒页那颗胶囊各自开的是**同一个面板**；
+  游客态三处入口全不摆（首页与两个列表页的右下角胶囊、列表页的「＋」都不在 DOM 里）。
+  顺带验出一件事：**面板的输入框在浏览器里能正常打字**，`uni-input` 那一坑确实被门禁堵住了。
+- **第二趟（同日傍晚，用户提「首页的"说一句话"也放在右下角」）**：首页那块实心块改成与两个列表页
+  同一颗右下角胶囊（`.ask-entry` 三处全删），`home-ask-entry.test.ts` 先 RED（4 红）后绿，并加了一条
+  "三颗样式只差 `bottom` 一行"的逐字比对；全量复跑 **114 文件 / 825 例绿**、`vue-tsc` 0 错；
+  本地 H5 热更新后亲眼读到首页 DOM 里是 `.ask-pill`（`bottom: calc(var(--window-bottom) + 40rpx)`）、
+  `.ask-entry` 已不在，点开仍是同一个面板。
+
+### 上线（本轮跑到哪、还差什么）
+
+`nest build` 干净。**H5 已重建并替换**（`/var/www/moonbud/h5`，旧的留在 `h5.old-2026-10-26d`），
+公网 `index.html`、`pages-event-list-index.Cf14cR4z.js`、`pages-home-index.83ovBkoD.js` 都是 200，
+最后一个里面能查到「说一句话」。
+
+**API 镜像还没重建**：这一轮的改动（`prompt.ts`、DTO、service/provider 签名）都在工作区里没提交，
+而服务器那一侧的固定路线是 `git bundle` → `master` ff-only → `docker compose build api`。
+不提交就没法走这条路，也不该往服务器的 checkout 里手抄文件（那会让它和 master 分叉）。
+**线上那一版还不认 `intentHint`**：`whitelist: true, forbidNonWhitelisted: false`，所以带着这个字段
+请求不会 400，只会被丢掉——面板上「记一笔 / 设提醒」那两个 chip 因此现在只是把同一句话原样再发一次，
+大概率还是 unknown、留在原地。**功能不坏，但那一步还没生效**，重建镜像才好。
+**App 那一路必须重新云打包**：装机版既没有乱码修复，也没有这一轮的三个入口。
+

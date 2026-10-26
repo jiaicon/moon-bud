@@ -15,6 +15,7 @@ import { formatEventLine } from '../../events/format-event'
 import { confirmDanger } from '../../utils/confirm'
 import { guardForcedChange } from '../../utils/forced-change'
 import EmptyState from '../../components/EmptyState.vue'
+import AskSheet from '../../components/AskSheet.vue'
 import GuestGuide from '../../components/GuestGuide.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useAuthStore } from '../../stores/auth'
@@ -38,6 +39,7 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const typeFilter = ref<EventType | ''>('')
 const typeSheetOpen = ref(false)
+const askOpen = ref(false)
 const recorderFilter = ref<string>('')
 const rangeFilter = ref<EventRange>('')
 /** 这一家的成员。空数组既可能是"只有我一个人"，也可能是"还没读到"，页面不替用户猜。 */
@@ -628,6 +630,14 @@ async function removeEvent(event: EventDto): Promise<void> {
 
       <view v-if="childId && !isGuest" class="fab" @click="goForm"><text class="fab__label">＋</text></view>
 
+      <!-- 说话的场景是"我正看着这张列表，突然想记一条"：入口就摆在这页上，
+           点开的是首页那一个面板，判定与跳转只在 AskSheet 里发生一次。 -->
+      <view v-if="childId && !isGuest" class="ask-pill" @click="askOpen = true">
+        <text class="ask-pill__label">说一句话</text>
+      </view>
+
+      <ask-sheet v-model:open="askOpen" :child-id="childId || null" />
+
       <u-popup
         v-model="typeSheetOpen"
         mode="right"
@@ -900,6 +910,27 @@ async function removeEvent(event: EventDto): Promise<void> {
 
 .fab__label {
   font-size: 48rpx;
+  color: var(--mb-color-on-primary);
+}
+
+.ask-pill {
+  position: fixed;
+  right: 40rpx;
+  /* 让出一个 FAB 的身位：两个同时在场时上下不叠，各按各的。 */
+  bottom: calc(var(--window-bottom) + 40rpx + 108rpx + 16rpx);
+  height: 72rpx;
+  padding: 0 28rpx;
+  border-radius: 999rpx;
+  background-color: var(--mb-color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.18);
+}
+
+.ask-pill__label {
+  font-size: 26rpx;
+  font-weight: 600;
   color: var(--mb-color-on-primary);
 }
 </style>

@@ -39,11 +39,11 @@ describe('助手：POST /assistant/parse', () => {
     return { token: res.body.accessToken as string, id: res.body.user.id as string }
   }
 
-  const post = (token: string, text: unknown) =>
+  const post = (token: string, text: unknown, extra: Record<string, unknown> = {}) =>
     request(app.getHttpServer())
       .post('/api/assistant/parse')
       .set('Authorization', `Bearer ${token}`)
-      .send({ text })
+      .send({ text, ...extra })
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
@@ -161,5 +161,28 @@ describe('助手：POST /assistant/parse', () => {
     expect(req.userId).toBe(me.id)
     expect(req.now).toBeInstanceOf(Date)
     expect(req.text).toBe('今天精神不错')
+  })
+
+  it('人确认过的意图随请求走到模型那一趟；没带就是 undefined', async () => {
+    const me = await register('assistant_hint')
+    parse.mockResolvedValue(EVENT_DRAFT)
+    await post(me.token, '宝宝该喂奶了', { intentHint: 'event' }).expect(200)
+    expect(parse.mock.calls[0]![0].intentHint).toBe('event')
+
+    parse.mockResolvedValue({ intent: 'unknown' })
+    await post(me.token, '今天精神不错').expect(200)
+    expect(parse.mock.calls[1]![0].intentHint).toBeUndefined()
+  })
+
+  it('intentHint 只收 event / reminder：乱码 400 中文，且模型一次都不会被叫起来', async () => {
+    const me = await register('assistant_hint_bad')
+    parse.mockResolvedValue(EVENT_DRAFT)
+    for (const intentHint of ['unknown', 'feeding', '', 3, null]) {
+      const res = await post(me.token, '宝宝该喂奶了', { intentHint }).expect(400)
+      const joined = String(res.body.message)
+      expect(joined).toMatch(/[\u4e00-\u9fa5]/)
+      expect(joined).not.toMatch(/[a-z]/i)
+    }
+    expect(parse).not.toHaveBeenCalled()
   })
 })

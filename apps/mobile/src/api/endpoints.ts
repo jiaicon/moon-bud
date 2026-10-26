@@ -1,4 +1,5 @@
 import type {
+  AssistantIntentHint,
   AssistantParseDto,
   AuthResponse,
   ChildDto,
@@ -180,8 +181,12 @@ export const devicesApi = {
 
 /** 一句话记录：服务端把原话换成草稿，客户端只负责把草稿搬进表单。 */
 export const assistantApi = {
-  parse: (text: string) =>
-    apiRequest<AssistantParseDto>('/assistant/parse', { method: 'POST', data: { text } }),
+  /** `intentHint` 是人在面板上确认过的那一个意图（"是要记一笔，还是设提醒"点了一下）。 */
+  parse: (text: string, intentHint?: AssistantIntentHint) =>
+    apiRequest<AssistantParseDto>('/assistant/parse', {
+      method: 'POST',
+      data: intentHint ? { text, intentHint } : { text },
+    }),
 }
 
 export type { ThemePresetId }

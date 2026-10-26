@@ -1,9 +1,13 @@
+import type { AssistantIntentHint } from '@moonbud/shared'
+
 /** 助手通道的一次请求：用户原话 + 服务端按账号读出来的时区口径。 */
 export interface AssistantRequest {
   userId: string
   text: string
   timezone: string
   now: Date
+  /** 人在界面上确认过的意图（面板里那句反问点了一下）。没确认就是 undefined。 */
+  intentHint?: AssistantIntentHint
 }
 
 /**

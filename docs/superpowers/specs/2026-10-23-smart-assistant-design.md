@@ -264,8 +264,10 @@ model Event {
   503 `ASSISTANT_UNAVAILABLE`、502 `ASSISTANT_TIMEOUT` / `ASSISTANT_BAD_OUTPUT`，
   响应体统一 `{ code, message }`，message 是中文一句，客户端直接念它
   （`ApiRequestError.message`），客户端**不重跑 zod**、只读服务端给出的结论。
-- **`dropped` 只用于首页那句提示，不进跳转 URL**：表单自己会用 `actionHint` 说实话
-  （一期 F5 定的口径），再加一个"预填状态"参数就是第二份真相。
+- **`dropped` 的去向（2026-10-26 存在感 v1 改了口径）**：一期把它念在首页的 toast 里，人已经跳走了，
+  那句话在说哪一栏没人知道。现在 `dropped` 随草稿一起进本地交接（`PickedEvent.dropped` /
+  `PickedReminder.dropped`），由表单顶部那条横幅说实话；首页不再提它。
+  仍然只有**一处**产文案的地方（`assistant/ask-flow.ts` 的 `askBannerCopy`），表单只负责摆它。
 - **信封是"恰好一个槽"**（终审补）：`intent` 说了 event 就必须只带 event——两个槽都填、
   或 unknown 还带负载，都在共享契约这一层判坏。客户端按 `intent` 分支取负载，
   多带的那一半会静不吭声地消失而 `dropped` 是空的，屏幕上那句"已按你说的话填好"就成了谎话。
@@ -279,5 +281,43 @@ model Event {
   `栏目: 错误码`，只有我们自己写的那句中文（custom issue）带文字。zod 的默认文案会把
   收到的原值念出来（`received '刚刚瓶喂 120 毫升'`），而那句话是要留在手机里的东西。
 - **周期草稿的钟点只能从 `rrule` 读回来**（终审补）：`RECURRING` 的 `dueAtWallClock` 合法地为 null，
-  跳转 URL 因此没有 `date/time`；表单的"几点"那一格必须用 `parseRruleForUi` 的
+  交接给表单的那份草稿因此只有 `rrule`、没有 date/time；表单的"几点"那一格必须用 `parseRruleForUi` 的
   `hour/minute` 覆盖，否则它停在打开页面的那一刻，而保存又按它重拼规则——提醒永远在那个钟点响。
+- **草稿不走 URL，走本地一次性交接**（2026-10-26 真机乱码后补，代码是 `src/assistant/draft-handoff.ts`）：
+  一期把标题、`type`、date/time、`actionPayload` 全塞进 `navigateTo` 的 query，真机上标题显示成
+  `%E5%AE%9D%E5%AE%9D…`。根因是平台的不对称：App 端每个 `navigateTo` 都会把 query 的**值**再
+  `encodeURIComponent` 一遍（`@dcloudio/uni-app-plus` 的 `encodeQueryString`），而 `onLoad` 的 options
+  只解一层；H5 因为 vue-router 多解了一层，所以浏览器里永远看不出问题。
+  修法是把 url 从这条链路上去掉而不是"按平台多解一次"：首页 `stageDraft()` 存进 storage，
+  表单 `onLoad` 取一次即删（`takeEventDraft` / `takeReminderDraft`），跳转 url 只剩页名。
+  三条口径：草稿的意图与当前页不匹配时**不消费**（留给另一张表单）；存放超过 **10 分钟**视为过期并删除
+  （否则第二天进来会被昨天的那句话预填）；编辑那一路（带 `id`）**不取草稿**，两头不能互相盖。
+  代价：预填不再是"能用 url 直接复现"的状态，真机验证清单一节因此补了第 8 步（中文必须是汉字）。
+
+## 助手存在感 v1 的补记（2026-10-26）
+
+用户的原话是「这个助手存在感太低了」。二期那一版把入口做成首页一栏带 placeholder 的输入框，
+结果没人知道那里能说话——**入口的失败不是找不到，是看不出它能用**。这一节的三条都以实现为准：
+
+- **三个入口，一个面板，三处是同一颗右下角胶囊。** 首页、记录页、提醒页各有一颗 `.ask-pill`
+  （`position: fixed` + `right: 40rpx`）：首页坐在 FAB 那一格 `bottom: calc(var(--window-bottom) + 40rpx)`，
+  记录页与提醒页在其上再让出一个 FAB 身位（`+ 108rpx + 16rpx`）。
+  **首页第一版是内容区顶部的实心块（`.ask-entry`，主色块 + 一行例句），当天就改掉了**：内容会滚，
+  滚过一格就等于没有；而三处长得一样，人才认得出"那是同一个能力"。
+  三处点开的都是同一个 `components/AskSheet.vue`：调用、判断 intent、交接、跳转只在这一处发生一次。
+  每页各写一遍就是三份会各自漂移的判定——这条由 `pages/__tests__/list-ask-pill.test.ts` 钉，
+  三颗胶囊的样式由 `home-ask-entry.test.ts` 逐字比对（剥掉注释与 `bottom` 后必须完全相同）。
+- **"没听懂"留在原地问，不换页。** `intent` 为 unknown 时不再 toast 一句"没看懂"，面板里直接问
+  "这句我没能判断，您想让我做哪一件？"，给「记一笔 / 设提醒」两个 chip；点一下带着 `intentHint`
+  把**同一句话**再发一次。服务端把 `intentHint` 拼进系统提示词（`prompt.ts` 的「【人已确认】」那一段），
+  它只锁意图、不放松"没说就留 null"那一句。DTO 用 `@ValidateIf(..., value !== undefined)` + `@IsIn(['event','reminder'])`：
+  `@IsOptional()` 会放 `null` 穿过去，而 null 不是确认过的意图。
+  反问的那一步绝不换页、绝不清空人打过的字——把人带去一张空表单比留在原地更坏。
+- **横幅取代跳转前的 toast。** 表单顶部那条（`.ask-banner`）只在真取到草稿时出现，编辑那一路（带 `id`）
+  根本不走它；文案是 `askBannerCopy(dropped)`：什么都没丢才允许说"填好了"，丢了任何一栏就只说"没填上"。
+- **例句是功能清单，不是散文。** `ASK_EXAMPLES` 恰好三句、每句 ≤30 字、两种意图各有覆盖，
+  且**不许**出现"今天喝了多少奶"这类这一期还答不出来的问句（`assistant/__tests__/ask-flow.test.ts` 钉死）。
+  点一句就是替人说完整句并直接发送。
+- **刻意没做的**：例句不逐条念 `dropped` 的字段名（要念就得在客户端再维护一张"路径→栏目名"的表，
+  而 `event-types.ts` 已经是那张表）；面板不做语音输入；入口不做游客态（游客口径是点击静默、不弹窗，
+  一个点开只会说"先登录"的入口比没有入口更坏）。

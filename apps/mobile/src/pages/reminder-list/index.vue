@@ -8,9 +8,11 @@ import { resyncActiveReminderSchedules, assigneeLabel } from '../../notification
 import { refreshUnreadTabBadge } from '../../notifications/tab-badge'
 import { reminderCardLabel } from '../../reminders/card-label'
 import EmptyState from '../../components/EmptyState.vue'
+import AskSheet from '../../components/AskSheet.vue'
 import GuestGuide from '../../components/GuestGuide.vue'
 import ThemeRoot from '../../components/ThemeRoot.vue'
 import { useAuthStore } from '../../stores/auth'
+import { useChildStore } from '../../stores/child'
 import { useFamilyStore } from '../../stores/family'
 
 const TABS = ['待办', '已过期', '已完成']
@@ -24,6 +26,7 @@ const EMPTY_HINTS = [
 
 const authStore = useAuthStore()
 const familyStore = useFamilyStore()
+const childStore = useChildStore()
 
 const isGuest = computed(() => authStore.isGuest)
 
@@ -38,6 +41,9 @@ const page = ref(1)
 const hasMore = computed(() => reminders.value.length < total.value)
 
 const familyId = computed(() => familyStore.currentFamilyId ?? '')
+/** 面板只管"这句话"，孩子是谁由这一页告诉它；缓存没读到时传 null，让表单自己问。 */
+const currentChildId = computed(() => childStore.currentChild(familyId.value)?.id ?? '')
+const askOpen = ref(false)
 
 /**
  * 卡片上"该谁"和推送正文必须是同一句话，所以用同一个函数，别各写一份。
@@ -218,6 +224,14 @@ onPullDownRefresh(() => {
       </template>
 
       <view v-if="familyId && !isGuest" class="fab" @click="goCreate"><text class="fab__label">＋</text></view>
+
+      <!-- 说话的场景是"我正看着这一堆待办，突然想再设一条"：入口摆在本页，
+           点开的是首页那一个面板，判定与跳转只在 AskSheet 里发生一次。 -->
+      <view v-if="familyId && !isGuest" class="ask-pill" @click="askOpen = true">
+        <text class="ask-pill__label">说一句话</text>
+      </view>
+
+      <ask-sheet v-model:open="askOpen" :child-id="currentChildId || null" />
     </view>
   </theme-root>
 </template>
@@ -342,6 +356,27 @@ onPullDownRefresh(() => {
 
 .fab__label {
   font-size: 48rpx;
+  color: var(--mb-color-on-primary);
+}
+
+.ask-pill {
+  position: fixed;
+  right: 40rpx;
+  /* 让出一个 FAB 的身位：两个同时在场时上下不叠，各按各的。 */
+  bottom: calc(var(--window-bottom) + 40rpx + 108rpx + 16rpx);
+  height: 72rpx;
+  padding: 0 28rpx;
+  border-radius: 999rpx;
+  background-color: var(--mb-color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.18);
+}
+
+.ask-pill__label {
+  font-size: 26rpx;
+  font-weight: 600;
   color: var(--mb-color-on-primary);
 }
 </style>

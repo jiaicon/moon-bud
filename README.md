@@ -17,7 +17,8 @@ moonBud/
 │  └─ mobile/         uni-app 客户端（Vue3 + TS + uView Pro）
 ├─ packages/shared/   唯一共享契约：记录类型的 zod 校验 + API 类型
 ├─ docs/superpowers/  设计文档与实施计划
-├─ docker-compose.yml postgres + api
+├─ docker-compose.yml postgres + api（**仅开发用**：发布 5433/3000，与线上那份是两套）
+├─ deploy/            线上那份：compose.prod.yml + nginx 站点配置
 └─ .env.example       环境变量样例
 ```
 
@@ -152,11 +153,116 @@ pnpm --filter @moonbud/mobile build:h5    # 生产构建，产物在 dist/build/
 
 ---
 
+## 部署到线上（腾讯云）
+
+线上是一台 1.9G 内存的 Ubuntu（`ssh ubuntu@<服务器 IP>`，IP 不写进仓库），域名 `yueya.iconmen.top`。
+**后端走 Docker 镜像，前端是一堆静态文件**，两条路互不相干：改了哪边就只跑哪边。
+
+### 先认识三个词
+
+| 词 | 是什么 | 这台机器上的对应物 |
+|---|---|---|
+| **容器** | 装好环境的小盒子，里面跑着程序 | `moonbud-postgres`（数据库）、`moonbud-api`（后端） |
+| **镜像** | 造盒子的模板；改了代码要重做模板 | `moonbud-api:prod` |
+| **compose** | 一份清单：起哪几个盒子、各给什么变量、数据存哪 | `deploy/compose.prod.yml` |
+
+拓扑：nginx（系统服务，80/443）→ 静态文件 `/var/www/moonbud/h5`；`/api` 反代到 `127.0.0.1:3100` → api 容器 → postgres 容器（走内网名 `postgres:5432`，一个端口都不对外发布）。公网上除了 80/443，没有月芽的任何入口。
+
+### 一、改了后端（`apps/api` 或 `packages/shared`）
+
+**1. 本机提交。** 打包只认提交，不认没提交的改动。
+
+**2. 打一个"代码包裹"并传过去。** GitHub 从那台机器连不上，所以不能 `git pull`；bundle 就是把一段 git 历史压成一个文件，解开后效果等同于拉取。
+
+```bash
+git bundle create /tmp/mb.bundle master          # 必须是分支名，不能是提交区间
+scp /tmp/mb.bundle ubuntu@<服务器 IP>:/tmp/mb.bundle
+```
+
+**3. 服务器上的代码快进到新提交。**
+
+```bash
+cd /home/workspace/moon-bud
+git fetch /tmp/mb.bundle master:refs/tmp/lat
+git merge --ff-only refs/tmp/lat                 # 护栏：只许往前挪
+git update-ref -d refs/tmp/lat
+```
+
+`--ff-only` 是关键：万一服务器上有人手改过代码造成分叉，它直接报错停下，而不是悄悄合出一个只有服务器独有的版本。
+
+**4. 重做镜像，再用新模板换掉后端盒子。**
+
+```bash
+sudo docker compose --env-file .env -f deploy/compose.prod.yml build api
+sudo docker compose --env-file .env -f deploy/compose.prod.yml up -d
+```
+
+- **`--env-file .env` 不能省。** compose 找 `.env` 的位置跟着清单文件所在目录走，不加它就去 `deploy/` 里找，然后以「JWT_ACCESS_SECRET is required」失败。
+- 密钥只在**服务器仓库根的 `.env`**（不进 git），清单里出现的只是变量名。哪一项留空会关掉哪条通道，都写在 `deploy/compose.prod.yml` 的注释里。
+- `up -d` 只重建**内容有变化**的那个盒子，数据库盒子不动、数据原样待着。
+- **改了表结构不需要任何单独步骤**：镜像的启动命令是 `prisma migrate deploy && node dist/main.js`，第 4 步盒子起来时顺手把库结构对齐了。
+
+### 二、改了前端（`apps/mobile`）
+
+前端完全不进 Docker。编译 → 打包 → 传 → 换目录。
+
+```bash
+cd apps/mobile && pnpm build:h5                  # 读 .env.production，产物在 dist/build/h5
+tar -czf /tmp/mbh5.tgz -C dist/build/h5 .
+scp /tmp/mbh5.tgz ubuntu@<服务器 IP>:/tmp/
+```
+
+```bash
+cd /var/www/moonbud
+sudo mv h5 h5.old-<日期>                          # 先留旧的一份，退路就是这一行反过来
+sudo mkdir h5
+sudo tar -xzf /tmp/mbh5.tgz -C h5
+sudo chown -R www-data:www-data h5
+```
+
+用户下次打开页面就是新版；nginx 那边什么都不用改（`index.html` 已设成 `no-cache`，带哈希的 `/assets/` 走 30 天长缓存）。
+
+### 三、每次部署完必须亲眼读到的四条
+
+```bash
+sudo docker ps                                          # 两个盒子都该是 Up
+sudo docker logs --tail 40 moonbud-api                  # 迁移结果 + 推送/助手两行的通道状态
+curl -s https://yueya.iconmen.top/api/health            # {"status":"ok","db":"up"}
+curl -s -o /dev/null -w "%{http_code}\n" https://yueya.iconmen.top/
+```
+
+### 四、回滚
+
+- **前端**：`sudo rm -rf /var/www/moonbud/h5 && sudo mv /var/www/moonbud/h5.old-<日期> h5`，一秒。
+- **后端**：把代码退回上一个提交，重跑第一节的第 2～4 步。
+- 只想重启服务、不动数据：`sudo docker compose --env-file .env -f deploy/compose.prod.yml restart api`。
+
+### 五、三条别踩
+
+1. **`down -v` 里的 `-v` 会把数据库整个删掉**（`down` 不带 `-v` 是安全的）。
+2. **别在服务器上直接改代码** —— 那会让它和 master 分叉，下次部署在第 3 步被 `--ff-only` 挡回来。要验证想法就在本机改完打包过去。
+3. **别 `docker system prune --volumes`** —— 那条会连数据卷一起清，等于第 1 条。
+
+### 数据存在哪、有几份
+
+Postgres 用的是 compose 声明的**命名卷**，宿主机路径 `/var/lib/docker/volumes/moonbud_moonbud-pgdata/_data`（在根分区上）。含义：删代码目录、重建镜像、换前端都碰不到它；但它**在 Docker 那棵树里**，所以第 1 和第 3 条那种带 `-v` 的命令能把它删掉。
+
+**目前全库只有一个副本**——这台机器上的这个卷，没有任何定时备份。要恢复只能靠 `pg_dump`：
+
+```bash
+sudo docker exec -i moonbud-postgres pg_dump -U <用户> -d <库> -Fc -f /tmp/backup.dump
+sudo docker cp moonbud-postgres:/tmp/backup.dump /home/ubuntu/
+```
+
+（`docker exec` 后面那个 `-i` 是必需的，少了它 stdin 会被丢掉。）库名与用户名在容器环境变量里：`sudo docker exec moonbud-postgres printenv POSTGRES_DB POSTGRES_USER`。
+
+---
+
 ## 已知环境差异（都是实测结论，不是猜测）
 
 - **宿主 Postgres 端口是 5433，不是 5432。** 这台机器上已有本地 `postgresql-x64-18` 服务占用 5432；容器若也发布到 5432，宿主的连接会被**本地实例**接走，报出 `role "moonbud" does not exist` —— 一个完全指不到真实原因的错误。容器内始终是 5432，compose 里的 `api` 服务用服务名 `postgres:5432`。
 - **API 镜像的基础镜像是 `node:22-alpine`，不是 24。** Docker Hub 在本机不可达（`connectex: connection actively refused`），只有缓存里已有的镜像可用。22 满足全部依赖（bcryptjs 是纯 JS，无 ABI 问题），宿主开发仍在 Node 24 上。Hub 可达后改一行即可。
-- **`docker compose build api` 尚未成功过一次。** 每次失败的都不是配置本身，而是容器内的依赖下载：Docker Hub 不可达，容器里抓包极慢（有一次跑到约 45 分钟仍近乎零 CPU，属停滞而非计算），已终止。**当前没有任何 `moonbud-api` 镜像。** 后端在本机以 `node dist/main.js` + 真实数据库验证过（`/api/health` 200、未知路由 404），未验证的是镜像构建与容器内的 `prisma migrate deploy`。Hub 或镜像源通畅后重跑即可，Dockerfile 本身没有已知缺陷。
+- **`docker compose build api` 在本机尚未成功过一次。** 每次失败的都不是配置本身，而是容器内的依赖下载：Docker Hub 不可达，容器里抓包极慢（有一次跑到约 45 分钟仍近乎零 CPU，属停滞而非计算），已终止。本机因此没有 `moonbud-api` 镜像，后端在本机以 `node dist/main.js` + 真实数据库验证（`/api/health` 200、未知路由 404）。**服务器上这条路已经跑通过很多次**（Dockerfile 里那些换镜像源、装 openssl、全局装 prisma 的写法都是被真实报错逼出来的），线上部署见上面「部署到线上」一节。
 - 依赖走 npmmirror 镜像（`.npmrc`）。容器内 corepack 也会抓 pnpm，所以 Dockerfile 里额外设了 `COREPACK_NPM_REGISTRY`。
 
 ---
